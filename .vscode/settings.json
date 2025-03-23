@@ -1,0 +1,39 @@
+{
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "javascript.validate.enable": false,
+  "typescript.validate.enable": true,
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/bower_components": true,
+    "**/build": true,
+    "**/ios/Pods": true
+  },
+  "files.associations": {
+    "*.tsx": "typescriptreact",
+    "*.ts": "typescript",
+    "*.js": "javascript",
+    "*.jsx": "javascriptreact"
+  },
+  "eslint.validate": [
+    "javascript",
+    "javascriptreact",
+    "typescript",
+    "typescriptreact"
+  ],
+  "react-native.debugger": {
+    "isEnabled": true, 
+    "useHermesEngine": true
+  },
+  "terminal.integrated.env.windows": {
+    "REACT_EDITOR": "code"
+  },
+  "terminal.integrated.env.osx": {
+    "REACT_EDITOR": "code"
+  },
+  "terminal.integrated.env.linux": {
+    "REACT_EDITOR": "code"
+  }
+} 
