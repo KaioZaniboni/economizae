@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,8 @@ import {
   FlatList,
   TouchableOpacity,
   Alert,
+  TextInput,
+  Modal,
 } from 'react-native';
 import { COLORS, METRICS } from '../constants';
 import { useShoppingList } from '../hooks';
@@ -14,28 +16,22 @@ import { ShoppingList } from '../types';
 
 export const HomeScreen = () => {
   const { lists, loading, error, createList } = useShoppingList();
+  const [modalVisible, setModalVisible] = useState(false);
+  const [newListName, setNewListName] = useState('');
 
   const handleCreateList = () => {
-    // Aqui seria exibido um diálogo para obter o nome da lista
-    Alert.prompt(
-      'Nova Lista',
-      'Digite o nome da nova lista de compras',
-      [
-        {
-          text: 'Cancelar',
-          style: 'cancel',
-        },
-        {
-          text: 'Criar',
-          onPress: (name) => {
-            if (name && name.trim()) {
-              createList(name.trim());
-            }
-          },
-        },
-      ],
-      'plain-text'
-    );
+    // Mostra um modal para obter o nome da lista em vez de Alert.prompt
+    setModalVisible(true);
+  };
+
+  const confirmCreateList = () => {
+    if (newListName && newListName.trim()) {
+      createList(newListName.trim());
+      setNewListName('');
+      setModalVisible(false);
+    } else {
+      Alert.alert('Erro', 'Por favor, digite um nome para a lista');
+    }
   };
 
   const renderListItem = ({ item }: { item: ShoppingList }) => {
@@ -52,16 +48,16 @@ export const HomeScreen = () => {
               {new Date(item.createdAt).toLocaleDateString()}
             </Text>
           </View>
-          
+
           <View style={styles.progressBarContainer}>
-            <View 
+            <View
               style={[
-                styles.progressBar, 
-                { width: `${progress}%` }
-              ]} 
+                styles.progressBar,
+                { width: `${progress}%` },
+              ]}
             />
           </View>
-          
+
           <View style={styles.listItemFooter}>
             <Text style={styles.itemCount}>
               {checkedCount}/{itemCount} itens
@@ -87,9 +83,9 @@ export const HomeScreen = () => {
     return (
       <View style={styles.centerContainer}>
         <Text style={styles.errorText}>{error}</Text>
-        <Button 
-          title="Tentar Novamente" 
-          onPress={() => {/* Reload data */}} 
+        <Button
+          title="Tentar Novamente"
+          onPress={() => {/* Reload data */}}
           style={styles.retryButton}
         />
       </View>
@@ -101,7 +97,7 @@ export const HomeScreen = () => {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Minhas Listas</Text>
       </View>
-      
+
       {lists.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>
@@ -121,7 +117,7 @@ export const HomeScreen = () => {
           contentContainerStyle={styles.listContainer}
         />
       )}
-      
+
       {lists.length > 0 && (
         <TouchableOpacity
           style={styles.fabButton}
@@ -130,6 +126,47 @@ export const HomeScreen = () => {
           <Text style={styles.fabButtonText}>+</Text>
         </TouchableOpacity>
       )}
+
+      {/* Modal para criar nova lista */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Nova Lista</Text>
+            <Text style={styles.modalSubtitle}>Digite o nome da nova lista de compras</Text>
+
+            <TextInput
+              style={styles.input}
+              value={newListName}
+              onChangeText={setNewListName}
+              placeholder="Nome da lista"
+              placeholderTextColor={COLORS.textSecondary}
+              autoFocus
+            />
+
+            <View style={styles.modalButtons}>
+              <Button
+                title="Cancelar"
+                onPress={() => {
+                  setModalVisible(false);
+                  setNewListName('');
+                }}
+                type="outline"
+                style={styles.modalButton}
+              />
+              <Button
+                title="Criar"
+                onPress={confirmCreateList}
+                style={styles.modalButton}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -239,4 +276,51 @@ const styles = StyleSheet.create({
     color: COLORS.background,
     fontWeight: 'bold',
   },
-}); 
+  // Estilos do modal
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalContent: {
+    width: '80%',
+    backgroundColor: COLORS.background,
+    borderRadius: METRICS.borderRadius,
+    padding: METRICS.sectionPadding,
+    alignItems: 'center',
+    elevation: 5,
+  },
+  modalTitle: {
+    fontSize: METRICS.fontSizeMedium,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    marginBottom: METRICS.smallMargin,
+  },
+  modalSubtitle: {
+    fontSize: METRICS.fontSizeSmall,
+    color: COLORS.textSecondary,
+    marginBottom: METRICS.doubleBaseMargin,
+    textAlign: 'center',
+  },
+  input: {
+    width: '100%',
+    height: 50,
+    borderWidth: 1,
+    borderColor: COLORS.textLight,
+    borderRadius: METRICS.borderRadius,
+    paddingHorizontal: METRICS.baseMargin,
+    fontSize: METRICS.fontSizeMedium,
+    color: COLORS.text,
+    marginBottom: METRICS.doubleBaseMargin,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+  },
+  modalButton: {
+    flex: 1,
+    marginHorizontal: METRICS.smallMargin,
+  },
+});

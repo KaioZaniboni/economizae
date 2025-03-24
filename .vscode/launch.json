@@ -2,18 +2,30 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Debug Android Hermes",
+      "request": "launch",
+      "type": "reactnativedirect",
+      "cwd": "${workspaceFolder}",
+      "platform": "android"
+    },
+
+    {
       "name": "Debug Android",
       "cwd": "${workspaceFolder}",
       "type": "reactnative",
       "request": "launch",
-      "platform": "android"
+      "platform": "android",
+      "enableDebug": true,
+      "sourceMaps": true
     },
     {
       "name": "Debug iOS",
       "cwd": "${workspaceFolder}",
       "type": "reactnative",
       "request": "launch",
-      "platform": "ios"
+      "platform": "ios",
+      "enableDebug": true,
+      "sourceMaps": true
     },
     {
       "name": "Attach to packager",
@@ -22,4 +34,4 @@
       "request": "attach"
     }
   ]
-} 
+}

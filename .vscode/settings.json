@@ -35,5 +35,6 @@
   },
   "terminal.integrated.env.linux": {
     "REACT_EDITOR": "code"
-  }
+  },
+  "java.compile.nullAnalysis.mode": "automatic"
 } 
