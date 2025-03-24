@@ -3,20 +3,33 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, View, StyleSheet } from 'react-native';
-import { COLORS } from '../constants';
+import { COLORS, FONTS } from '../constants';
 import { HomeScreen } from '../screens/HomeScreen';
 import { DebugScreen } from '../screens/DebugScreen';
 
+// Tema de navegação para garantir que as cores sejam aplicadas corretamente
+const navigationTheme = {
+  dark: false,
+  colors: {
+    primary: COLORS.primary,
+    background: COLORS.background,
+    card: COLORS.background,
+    text: COLORS.text,
+    border: COLORS.textLight,
+    notification: COLORS.error,
+  },
+};
+
 // Vamos criar componentes de placeholder para as outras telas
 const StatisticsScreen = () => (
-  <View style={styles.center}>
-    <Text>Estatísticas</Text>
+  <View style={[styles.center, { backgroundColor: COLORS.background }]}>
+    <Text style={{ color: COLORS.text }}>Estatísticas</Text>
   </View>
 );
 
 const SettingsScreen = () => (
-  <View style={styles.center}>
-    <Text>Configurações</Text>
+  <View style={[styles.center, { backgroundColor: COLORS.background }]}>
+    <Text style={{ color: COLORS.text }}>Configurações</Text>
   </View>
 );
 
@@ -83,7 +96,7 @@ const MainTabNavigator = () => {
           ),
         }}
       />
-      
+
       {/* Tela de depuração que só aparece em ambiente de desenvolvimento */}
       {__DEV__ && (
         <Tab.Screen
@@ -104,7 +117,7 @@ const MainTabNavigator = () => {
 // Navegador principal da aplicação
 export const AppNavigator = () => {
   return (
-    <NavigationContainer>
+    <NavigationContainer theme={navigationTheme}>
       <Stack.Navigator
         screenOptions={{
           headerStyle: {
@@ -112,7 +125,11 @@ export const AppNavigator = () => {
           },
           headerTintColor: COLORS.background,
           headerTitleStyle: {
+            fontFamily: FONTS.primary.bold,
             fontWeight: 'bold',
+          },
+          contentStyle: {
+            backgroundColor: COLORS.background,
           },
         }}
       >
@@ -138,4 +155,4 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 10,
   },
-}); 
+});

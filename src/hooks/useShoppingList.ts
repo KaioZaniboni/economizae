@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect } from 'react';
-import { Item, ShoppingList } from '../types';
-import { logDebug, logError, logPerformance } from '../utils/debug';
+import {useState, useCallback, useEffect} from 'react';
+import {Item, ShoppingList} from '../types';
+import {logDebug, logError, logPerformance} from '../utils/debug';
 
 // Tag para identificar logs deste componente
 const TAG = 'useShoppingList';
@@ -8,7 +8,7 @@ const TAG = 'useShoppingList';
 // Apenas um exemplo de implementação, na prática seria integrado com AsyncStorage e/ou Redux
 export const useShoppingList = () => {
   const [lists, setLists] = useState<ShoppingList[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Carregar listas de compras do armazenamento local
@@ -16,45 +16,15 @@ export const useShoppingList = () => {
     const loadLists = async () => {
       try {
         setLoading(true);
+        // Simular um pequeno atraso para garantir que a UI tenha tempo de renderizar o estado de loading
+        await new Promise(resolve => setTimeout(resolve, 300));
+
         // Aqui seria feita a leitura do AsyncStorage ou chamada API
-        // Por enquanto, vamos simular com dados estáticos
         logDebug(TAG, 'Carregando listas de compras...');
-        
-        const mockLists: ShoppingList[] = [
-          {
-            id: '1',
-            name: 'Lista do Supermercado',
-            items: [
-              {
-                id: '101',
-                name: 'Leite',
-                quantity: 2,
-                unit: 'l',
-                price: 4.99,
-                checked: false,
-                category: 'Laticínios',
-                createdAt: Date.now(),
-                updatedAt: Date.now(),
-              },
-              {
-                id: '102',
-                name: 'Pão',
-                quantity: 1,
-                unit: 'un',
-                price: 6.50,
-                checked: true,
-                category: 'Padaria',
-                createdAt: Date.now(),
-                updatedAt: Date.now(),
-              },
-            ],
-            total: 16.48,
-            completed: false,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          },
-        ];
-        
+
+        // Inicializa com um array vazio, sem listas pré-definidas
+        const mockLists: ShoppingList[] = [];
+
         setLists(mockLists);
         setError(null);
         logDebug(TAG, `${mockLists.length} listas carregadas com sucesso`);
@@ -70,17 +40,22 @@ export const useShoppingList = () => {
   }, []);
 
   // Criar uma nova lista
-  const createList = useCallback(async (name: string): Promise<ShoppingList> => {
-    return logPerformance(
-      `${TAG}_createList`,
-      async () => {
+  const createList = useCallback(
+    async (name: string, budget?: number): Promise<ShoppingList> => {
+      return logPerformance(`${TAG}_createList`, async () => {
         try {
-          logDebug(TAG, `Criando nova lista: ${name}`);
+          logDebug(
+            TAG,
+            `Criando nova lista: ${name}${
+              budget ? ` com orçamento: R$ ${budget.toFixed(2)}` : ''
+            }`,
+          );
           const newList: ShoppingList = {
             id: Date.now().toString(),
             name,
             items: [],
             total: 0,
+            budget,
             completed: false,
             createdAt: Date.now(),
             updatedAt: Date.now(),
@@ -94,17 +69,23 @@ export const useShoppingList = () => {
           logError(TAG, err);
           throw err;
         }
-      }
-    );
-  }, []);
+      });
+    },
+    [],
+  );
 
   // Adicionar item a uma lista
-  const addItem = useCallback(async (listId: string, item: Omit<Item, 'id' | 'checked' | 'createdAt' | 'updatedAt'>): Promise<Item> => {
-    return logPerformance(
-      `${TAG}_addItem`,
-      async () => {
+  const addItem = useCallback(
+    async (
+      listId: string,
+      item: Omit<Item, 'id' | 'checked' | 'createdAt' | 'updatedAt'>,
+    ): Promise<Item> => {
+      return logPerformance(`${TAG}_addItem`, async () => {
         try {
-          logDebug(TAG, `Adicionando item à lista ${listId}: ${JSON.stringify(item)}`);
+          logDebug(
+            TAG,
+            `Adicionando item à lista ${listId}: ${JSON.stringify(item)}`,
+          );
           const newItem: Item = {
             id: Date.now().toString(),
             ...item,
@@ -113,7 +94,7 @@ export const useShoppingList = () => {
             updatedAt: Date.now(),
           };
 
-          setLists(prev => 
+          setLists(prev =>
             prev.map(list => {
               if (list.id === listId) {
                 const updatedItems = [...list.items, newItem];
@@ -126,7 +107,7 @@ export const useShoppingList = () => {
                 };
               }
               return list;
-            })
+            }),
           );
 
           return newItem;
@@ -135,17 +116,26 @@ export const useShoppingList = () => {
           logError(TAG, err);
           throw err;
         }
-      }
-    );
-  }, []);
+      });
+    },
+    [],
+  );
 
   // Atualizar item na lista
-  const updateItem = useCallback(async (listId: string, itemId: string, updates: Partial<Item>): Promise<Item> => {
-    return logPerformance(
-      `${TAG}_updateItem`,
-      async () => {
+  const updateItem = useCallback(
+    async (
+      listId: string,
+      itemId: string,
+      updates: Partial<Item>,
+    ): Promise<Item> => {
+      return logPerformance(`${TAG}_updateItem`, async () => {
         try {
-          logDebug(TAG, `Atualizando item ${itemId} na lista ${listId}: ${JSON.stringify(updates)}`);
+          logDebug(
+            TAG,
+            `Atualizando item ${itemId} na lista ${listId}: ${JSON.stringify(
+              updates,
+            )}`,
+          );
           let updatedItem: Item | null = null;
 
           setLists(prev =>
@@ -164,7 +154,7 @@ export const useShoppingList = () => {
                 });
 
                 const total = calculateTotal(updatedItems);
-                
+
                 return {
                   ...list,
                   items: updatedItems,
@@ -173,7 +163,7 @@ export const useShoppingList = () => {
                 };
               }
               return list;
-            })
+            }),
           );
 
           if (!updatedItem) {
@@ -186,23 +176,25 @@ export const useShoppingList = () => {
           logError(TAG, err);
           throw err;
         }
-      }
-    );
-  }, []);
+      });
+    },
+    [],
+  );
 
   // Remover item da lista
-  const removeItem = useCallback(async (listId: string, itemId: string): Promise<void> => {
-    return logPerformance(
-      `${TAG}_removeItem`,
-      async () => {
+  const removeItem = useCallback(
+    async (listId: string, itemId: string): Promise<void> => {
+      return logPerformance(`${TAG}_removeItem`, async () => {
         try {
           logDebug(TAG, `Removendo item ${itemId} da lista ${listId}`);
           setLists(prev =>
             prev.map(list => {
               if (list.id === listId) {
-                const updatedItems = list.items.filter(item => item.id !== itemId);
+                const updatedItems = list.items.filter(
+                  item => item.id !== itemId,
+                );
                 const total = calculateTotal(updatedItems);
-                
+
                 return {
                   ...list,
                   items: updatedItems,
@@ -211,15 +203,89 @@ export const useShoppingList = () => {
                 };
               }
               return list;
-            })
+            }),
           );
         } catch (err) {
           setError('Erro ao remover item');
           logError(TAG, err);
           throw err;
         }
+      });
+    },
+    [],
+  );
+
+  // Atualizar lista completa
+  const updateList = useCallback(
+    async (
+      listId: string,
+      updates: Partial<ShoppingList>,
+    ): Promise<ShoppingList> => {
+      return logPerformance(`${TAG}_updateList`, async () => {
+        try {
+          logDebug(
+            TAG,
+            `Atualizando lista ${listId}: ${JSON.stringify(updates)}`,
+          );
+
+          let updatedList: ShoppingList | null = null;
+
+          setLists(prev => {
+            const newLists = prev.map(list => {
+              if (list.id === listId) {
+                updatedList = {
+                  ...list,
+                  ...updates,
+                  updatedAt: Date.now(),
+                };
+                return updatedList;
+              }
+              return list;
+            });
+
+            if (!updatedList) {
+              throw new Error('Lista não encontrada');
+            }
+
+            return newLists;
+          });
+
+          if (!updatedList) {
+            throw new Error('Lista não encontrada');
+          }
+
+          return updatedList;
+        } catch (err) {
+          setError('Erro ao atualizar lista');
+          logError(TAG, err);
+          throw err;
+        }
+      });
+    },
+    [],
+  );
+
+  // Excluir lista
+  const deleteList = useCallback(async (listId: string): Promise<void> => {
+    return logPerformance(`${TAG}_deleteList`, async () => {
+      try {
+        logDebug(TAG, `Excluindo lista ${listId}`);
+
+        setLists(prev => {
+          const filteredLists = prev.filter(list => list.id !== listId);
+
+          if (filteredLists.length === prev.length) {
+            throw new Error('Lista não encontrada');
+          }
+
+          return filteredLists;
+        });
+      } catch (err) {
+        setError('Erro ao excluir lista');
+        logError(TAG, err);
+        throw err;
       }
-    );
+    });
   }, []);
 
   // Função para calcular o total da lista
@@ -237,5 +303,7 @@ export const useShoppingList = () => {
     addItem,
     updateItem,
     removeItem,
+    updateList,
+    deleteList,
   };
-}; 
+};

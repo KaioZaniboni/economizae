@@ -8,7 +8,7 @@ import {
   ViewStyle,
   TextStyle,
 } from 'react-native';
-import { COLORS, METRICS } from '../../constants';
+import { COLORS, METRICS, TEXT_STYLES } from '../../constants';
 
 interface ButtonProps {
   title: string;
@@ -151,6 +151,7 @@ const styles = StyleSheet.create({
   text: {
     fontSize: METRICS.fontSizeMedium,
     fontWeight: '600',
+    fontFamily: TEXT_STYLES.button.fontFamily,
   },
   primaryText: {
     color: COLORS.background,
@@ -167,4 +168,4 @@ const styles = StyleSheet.create({
   disabledText: {
     color: COLORS.textSecondary,
   },
-}); 
+});

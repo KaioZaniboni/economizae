@@ -15,6 +15,7 @@ export interface ShoppingList {
   name: string;
   items: Item[];
   total?: number;
+  budget?: number;
   completed: boolean;
   createdAt: number;
   updatedAt: number;
@@ -25,7 +26,7 @@ export type Category = {
   name: string;
   color: string;
   icon?: string;
-}
+};
 
 export type FilterOptions = {
   completed?: boolean;
@@ -36,4 +37,4 @@ export type FilterOptions = {
   };
   sortBy?: 'createdAt' | 'updatedAt' | 'name' | 'price';
   sortOrder?: 'asc' | 'desc';
-}; 
+};

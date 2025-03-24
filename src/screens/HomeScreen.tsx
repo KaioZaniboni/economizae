@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,9 @@ import {
   Alert,
   TextInput,
   Modal,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { COLORS, METRICS } from '../constants';
 import { useShoppingList } from '../hooks';
@@ -15,33 +18,328 @@ import { Card, Button } from '../components/common';
 import { ShoppingList } from '../types';
 
 export const HomeScreen = () => {
-  const { lists, loading, error, createList } = useShoppingList();
+  const { lists, loading, error, createList, updateList, deleteList } = useShoppingList();
   const [modalVisible, setModalVisible] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
   const [newListName, setNewListName] = useState('');
+  const [newListBudget, setNewListBudget] = useState('');
+  const [formattedBudget, setFormattedBudget] = useState('');
+  const [selectedList, setSelectedList] = useState<ShoppingList | null>(null);
+  const [selectedLists, setSelectedLists] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
+  const inputRef = useRef<TextInput>(null);
+
+  // Formatar o valor monetário quando o usuário digita
+  const formatCurrency = (value: string) => {
+    // Remover todos os caracteres não numéricos
+    let numericValue = value.replace(/[^0-9]/g, '');
+
+    // Se não há valor, retorna o formato inicial R$ 0,00
+    if (numericValue.length === 0) {
+      return 'R$ 0,00';
+    }
+
+    // Formatar como uma calculadora, onde cada dígito inserido se move da direita para a esquerda
+    // Exemplo: 1 -> R$ 0,01, 12 -> R$ 0,12, 123 -> R$ 1,23, 1234 -> R$ 12,34...
+
+    // Garantir que temos no mínimo 3 dígitos (para ter 0,XX)
+    numericValue = numericValue.padStart(3, '0');
+
+    // Separar os centavos (2 últimos dígitos)
+    const cents = numericValue.slice(-2);
+
+    // Obter a parte inteira sem zeros à esquerda desnecessários
+    let integerPart = numericValue.slice(0, -2);
+
+    // Remover zeros à esquerda da parte inteira (exceto se for apenas 0)
+    integerPart = integerPart === '0' || integerPart === '' ? '0' : integerPart.replace(/^0+/, '');
+
+    // Formatar a parte inteira com separadores de milhar
+    let formattedInteger = '';
+
+    // Se houver dígitos na parte inteira, adicionar separadores
+    if (integerPart.length > 0) {
+      for (let i = 0; i < integerPart.length; i++) {
+        // Adicionar ponto a cada 3 dígitos da direita para a esquerda
+        if (i > 0 && (integerPart.length - i) % 3 === 0) {
+          formattedInteger += '.';
+        }
+        formattedInteger += integerPart[i];
+      }
+    } else {
+      formattedInteger = '0';
+    }
+
+    // Retornar o valor formatado
+    return `R$ ${formattedInteger},${cents}`;
+  };
+
+  // Atualizar o valor formatado quando o campo for preenchido
+  const handleBudgetChange = (value: string) => {
+    // Se o valor estiver vazio, inicializar com valor zero
+    if (!value) {
+      setNewListBudget('');
+      setFormattedBudget('R$ 0,00');
+      return;
+    }
+
+    // Se o usuário apagar até o símbolo da moeda, reiniciar com valor zero
+    if (value === 'R$ ' || value === 'R$' || value === 'R') {
+      setNewListBudget('');
+      setFormattedBudget('R$ 0,00');
+      return;
+    }
+
+    // Extrair apenas os números do valor
+    const numericValue = value.replace(/[^0-9]/g, '');
+
+    // Armazenar o valor numérico real para submissão
+    setNewListBudget(numericValue);
+
+    // Formatar para exibição
+    setFormattedBudget(formatCurrency(numericValue));
+  };
 
   const handleCreateList = () => {
-    // Mostra um modal para obter o nome da lista em vez de Alert.prompt
+    // Limpar campos antes de mostrar o modal
+    setNewListName('');
+    setNewListBudget('');
+    setFormattedBudget('R$ 0,00');
+
+    // Mostra um modal para obter o nome da lista
     setModalVisible(true);
   };
 
   const confirmCreateList = () => {
     if (newListName && newListName.trim()) {
-      createList(newListName.trim());
-      setNewListName('');
-      setModalVisible(false);
+      // Converter o orçamento para número, se fornecido
+      let budget: number | undefined;
+
+      if (newListBudget) {
+        // Verificar se o valor é apenas zeros (0,00)
+        const isZeroValue = /^0*$/.test(newListBudget);
+
+        // Converter o valor para número (dividindo por 100 para ter o valor correto)
+        budget = parseFloat(newListBudget) / 100;
+
+        // Validar se o orçamento é um número válido
+        if (isNaN(budget)) {
+          Alert.alert('Erro', 'Por favor, digite um valor válido para o orçamento');
+          return;
+        }
+
+        // Se o valor for 0,00, considerar como undefined (sem orçamento)
+        if (isZeroValue || budget === 0) {
+          budget = undefined;
+        }
+      }
+
+      try {
+        createList(newListName.trim(), budget);
+        setNewListName('');
+        setNewListBudget('');
+        setFormattedBudget('R$ 0,00');
+        setModalVisible(false);
+      } catch (error) {
+        Alert.alert('Erro', 'Não foi possível criar a lista');
+      }
     } else {
       Alert.alert('Erro', 'Por favor, digite um nome para a lista');
     }
   };
+
+  // Alternar a seleção de uma lista
+  const toggleListSelection = (listId: string) => {
+    const newSelectedLists = new Set(selectedLists);
+
+    if (newSelectedLists.has(listId)) {
+      newSelectedLists.delete(listId);
+    } else {
+      newSelectedLists.add(listId);
+    }
+
+    setSelectedLists(newSelectedLists);
+
+    // Se não há mais itens selecionados, sair do modo de seleção
+    if (newSelectedLists.size === 0) {
+      setSelectionMode(false);
+    } else if (!selectionMode) {
+      setSelectionMode(true);
+    }
+  };
+
+  // Cancelar o modo de seleção
+  const cancelSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedLists(new Set());
+  };
+
+  // Editar a lista selecionada (apenas uma)
+  const handleEditSelected = () => {
+    if (selectedLists.size !== 1) {
+      Alert.alert('Aviso', 'Selecione apenas uma lista para editar');
+      return;
+    }
+
+    const listId = Array.from(selectedLists)[0];
+    const listToEdit = lists.find(list => list.id === listId);
+
+    if (listToEdit) {
+      handleEditList(listToEdit);
+    }
+  };
+
+  const handleEditList = (list: ShoppingList) => {
+    setSelectedList(list);
+    setNewListName(list.name);
+
+    // Formatar o orçamento para exibição
+    if (list.budget !== undefined) {
+      // Converter o orçamento para centavos (formato numérico para o estado)
+      const budgetInCents = Math.round(list.budget * 100).toString();
+      setNewListBudget(budgetInCents);
+      // Formatar para exibição
+      setFormattedBudget(formatCurrency(budgetInCents));
+    } else {
+      setNewListBudget('');
+      setFormattedBudget('R$ 0,00');
+    }
+
+    setEditModalVisible(true);
+    // Limpar a seleção após abrir o modal de edição
+    cancelSelectionMode();
+  };
+
+  const confirmEditList = () => {
+    if (!selectedList) {return;}
+
+    if (newListName && newListName.trim()) {
+      // Converter o orçamento para número, se fornecido
+      let budget: number | undefined;
+
+      if (newListBudget) {
+        // Verificar se o valor é apenas zeros (0,00)
+        const isZeroValue = /^0*$/.test(newListBudget);
+
+        // Converter o valor para número (dividindo por 100 para ter o valor correto)
+        budget = parseFloat(newListBudget) / 100;
+
+        // Validar se o orçamento é um número válido
+        if (isNaN(budget)) {
+          Alert.alert('Erro', 'Por favor, digite um valor válido para o orçamento');
+          return;
+        }
+
+        // Se o valor for 0,00, considerar como undefined (sem orçamento)
+        if (isZeroValue || budget === 0) {
+          budget = undefined;
+        }
+      }
+
+      try {
+        // Manter os mesmos itens da lista original
+        updateList(selectedList.id, {
+          ...selectedList,
+          name: newListName.trim(),
+          budget,
+        });
+
+        setNewListName('');
+        setNewListBudget('');
+        setFormattedBudget('R$ 0,00');
+        setSelectedList(null);
+        setEditModalVisible(false);
+      } catch (error) {
+        Alert.alert('Erro', 'Não foi possível atualizar a lista');
+      }
+    } else {
+      Alert.alert('Erro', 'Por favor, digite um nome para a lista');
+    }
+  };
+
+  // Excluir as listas selecionadas
+  const handleDeleteSelected = () => {
+    if (selectedLists.size === 0) {
+      return;
+    }
+
+    const count = selectedLists.size;
+    const mensagem = count === 1
+      ? 'Tem certeza que deseja excluir esta lista de compras?'
+      : `Tem certeza que deseja excluir estas ${count} listas de compras?`;
+
+    Alert.alert(
+      'Excluir Lista(s)',
+      mensagem,
+      [
+        {
+          text: 'Cancelar',
+          style: 'cancel',
+        },
+        {
+          text: 'Excluir',
+          onPress: () => {
+            try {
+              // Excluir cada lista selecionada
+              const deletePromises = Array.from(selectedLists).map(listId =>
+                deleteList(listId)
+              );
+
+              Promise.all(deletePromises)
+                .then(() => {
+                  // Limpar seleção após exclusão
+                  cancelSelectionMode();
+                })
+                .catch(() => {
+                  Alert.alert('Erro', 'Não foi possível excluir uma ou mais listas');
+                });
+            } catch (error) {
+              Alert.alert('Erro', 'Não foi possível excluir as listas');
+            }
+          },
+          style: 'destructive',
+        },
+      ]
+    );
+  };
+
+  // Renderizar a tela de carregamento
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Carregando...</Text>
+      </View>
+    );
+  }
 
   const renderListItem = ({ item }: { item: ShoppingList }) => {
     const itemCount = item.items.length;
     const checkedCount = item.items.filter(i => i.checked).length;
     const progress = itemCount > 0 ? (checkedCount / itemCount) * 100 : 0;
 
+    // Verificar se o total excede o orçamento (quando ambos estão definidos)
+    const isOverBudget = item.budget !== undefined && item.total !== undefined && item.total > item.budget;
+
+    // Verificar se este item está selecionado
+    const isSelected = selectedLists.has(item.id);
+
     return (
-      <Card onPress={() => {/* Navegar para a lista */}}>
+      <Card
+        onPress={() => {
+          toggleListSelection(item.id);
+        }}
+        style={isSelected ? styles.selectedCard : undefined}
+      >
         <View style={styles.listItemContainer}>
+          {/* Indicador de seleção sempre visível e posicionado à esquerda */}
+          <View style={styles.checkboxContainer}>
+            <TouchableOpacity
+              style={[styles.checkbox, isSelected && styles.checkboxSelected]}
+              onPress={() => toggleListSelection(item.id)}
+            />
+          </View>
+
           <View style={styles.listItemHeader}>
             <Text style={styles.listTitle}>{item.name}</Text>
             <Text style={styles.listDate}>
@@ -59,25 +357,24 @@ export const HomeScreen = () => {
           </View>
 
           <View style={styles.listItemFooter}>
-            <Text style={styles.itemCount}>
-              {checkedCount}/{itemCount} itens
-            </Text>
-            <Text style={styles.listTotal}>
-              Total: R$ {item.total?.toFixed(2)}
+            <View style={styles.countBudgetContainer}>
+              <Text style={styles.itemCount}>
+                {checkedCount}/{itemCount} itens
+              </Text>
+              {item.budget !== undefined && (
+                <Text style={styles.budgetText}>
+                  Orçamento: R$ {item.budget.toFixed(2)}
+                </Text>
+              )}
+            </View>
+            <Text style={[styles.listTotal, isOverBudget && styles.overBudget]}>
+              Total: R$ {item.total?.toFixed(2) || '0.00'}
             </Text>
           </View>
         </View>
       </Card>
     );
   };
-
-  if (loading) {
-    return (
-      <View style={styles.centerContainer}>
-        <Text>Carregando...</Text>
-      </View>
-    );
-  }
 
   if (error) {
     return (
@@ -95,16 +392,31 @@ export const HomeScreen = () => {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Minhas Listas</Text>
+        <Text style={styles.headerTitle}>
+          {selectionMode
+            ? `${selectedLists.size} selecionada${selectedLists.size !== 1 ? 's' : ''}`
+            : 'Minhas Listas'}
+        </Text>
+        {selectionMode && (
+          <TouchableOpacity
+            onPress={cancelSelectionMode}
+            style={styles.cancelSelectionButton}
+          >
+            <Text style={styles.cancelSelectionText}>Cancelar</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {lists.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>
-            Você ainda não possui listas de compras
+            Você ainda não tem listas de compras
+          </Text>
+          <Text style={styles.emptySubtext}>
+            Toque no botão abaixo para criar sua primeira lista
           </Text>
           <Button
-            title="Criar Lista"
+            title="Criar Nova Lista"
             onPress={handleCreateList}
             style={styles.createButton}
           />
@@ -118,54 +430,141 @@ export const HomeScreen = () => {
         />
       )}
 
-      {lists.length > 0 && (
-        <TouchableOpacity
-          style={styles.fabButton}
-          onPress={handleCreateList}
-        >
-          <Text style={styles.fabButtonText}>+</Text>
-        </TouchableOpacity>
+      {selectionMode ? (
+        <View style={styles.actionBarContainer}>
+          <TouchableOpacity
+            style={[
+              styles.actionButton,
+              selectedLists.size !== 1 && styles.actionButtonDisabled,
+            ]}
+            onPress={handleEditSelected}
+            disabled={selectedLists.size !== 1}
+          >
+            <Text style={styles.actionButtonText}>Editar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={handleDeleteSelected}
+          >
+            <Text style={styles.actionButtonText}>Excluir</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        lists.length > 0 && (
+          <TouchableOpacity
+            style={styles.addButton}
+            onPress={handleCreateList}
+          >
+            <Text style={styles.addButtonText}>+</Text>
+          </TouchableOpacity>
+        )
       )}
 
-      {/* Modal para criar nova lista */}
+      {/* Modal para entrada do nome da lista e orçamento */}
       <Modal
         animationType="slide"
         transparent={true}
         visible={modalVisible}
         onRequestClose={() => setModalVisible(false)}
       >
-        <View style={styles.modalContainer}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalContainer}
+        >
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Nova Lista</Text>
-            <Text style={styles.modalSubtitle}>Digite o nome da nova lista de compras</Text>
-
+            <Text style={styles.modalTitle}>Nova Lista de Compras</Text>
             <TextInput
               style={styles.input}
+              placeholder="Nome da lista"
               value={newListName}
               onChangeText={setNewListName}
-              placeholder="Nome da lista"
-              placeholderTextColor={COLORS.textSecondary}
               autoFocus
             />
-
+            <TextInput
+              ref={inputRef}
+              style={styles.input}
+              placeholder="Orçamento"
+              value={formattedBudget}
+              onChangeText={handleBudgetChange}
+              keyboardType="numeric"
+              caretHidden={true}
+              selectTextOnFocus={false}
+              onFocus={() => {
+                // Não fazer nada especial ao focar, manter o valor atual
+              }}
+            />
             <View style={styles.modalButtons}>
               <Button
                 title="Cancelar"
                 onPress={() => {
-                  setModalVisible(false);
                   setNewListName('');
+                  setNewListBudget('');
+                  setFormattedBudget('');
+                  setModalVisible(false);
                 }}
                 type="outline"
-                style={styles.modalButton}
               />
               <Button
                 title="Criar"
                 onPress={confirmCreateList}
-                style={styles.modalButton}
               />
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Modal para editar uma lista existente */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={editModalVisible}
+        onRequestClose={() => setEditModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalContainer}
+        >
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Editar Lista de Compras</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Nome da lista"
+              value={newListName}
+              onChangeText={setNewListName}
+              autoFocus
+            />
+            <TextInput
+              ref={inputRef}
+              style={styles.input}
+              placeholder="Orçamento"
+              value={formattedBudget}
+              onChangeText={handleBudgetChange}
+              keyboardType="numeric"
+              caretHidden={true}
+              selectTextOnFocus={false}
+              onFocus={() => {
+                // Não fazer nada especial ao focar, manter o valor atual
+              }}
+            />
+            <View style={styles.modalButtons}>
+              <Button
+                title="Cancelar"
+                onPress={() => {
+                  setSelectedList(null);
+                  setNewListName('');
+                  setNewListBudget('');
+                  setFormattedBudget('R$ 0,00');
+                  setEditModalVisible(false);
+                }}
+                type="outline"
+              />
+              <Button
+                title="Salvar"
+                onPress={confirmEditList}
+              />
+            </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -174,7 +573,7 @@ export const HomeScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.backgroundDark,
+    backgroundColor: COLORS.background,
   },
   header: {
     padding: METRICS.sectionPadding,
@@ -195,10 +594,18 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: METRICS.sectionPadding,
+    padding: METRICS.baseMargin,
+    backgroundColor: COLORS.background,
   },
   emptyText: {
-    fontSize: METRICS.fontSizeMedium,
+    fontSize: METRICS.fontSizeLarge,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    marginBottom: METRICS.baseMargin,
+    textAlign: 'center',
+  },
+  emptySubtext: {
+    fontSize: METRICS.fontSizeRegular,
     color: COLORS.textSecondary,
     marginBottom: METRICS.doubleBaseMargin,
     textAlign: 'center',
@@ -211,6 +618,8 @@ const styles = StyleSheet.create({
   },
   listItemContainer: {
     paddingVertical: METRICS.smallMargin,
+    paddingLeft: 65,
+    position: 'relative',
   },
   listItemHeader: {
     flexDirection: 'row',
@@ -259,7 +668,7 @@ const styles = StyleSheet.create({
   retryButton: {
     width: 180,
   },
-  fabButton: {
+  addButton: {
     position: 'absolute',
     bottom: METRICS.doubleBaseMargin,
     right: METRICS.doubleBaseMargin,
@@ -271,7 +680,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     elevation: 5,
   },
-  fabButtonText: {
+  addButtonText: {
     fontSize: 24,
     color: COLORS.background,
     fontWeight: 'bold',
@@ -297,12 +706,6 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     marginBottom: METRICS.smallMargin,
   },
-  modalSubtitle: {
-    fontSize: METRICS.fontSizeSmall,
-    color: COLORS.textSecondary,
-    marginBottom: METRICS.doubleBaseMargin,
-    textAlign: 'center',
-  },
   input: {
     width: '100%',
     height: 50,
@@ -319,8 +722,86 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     width: '100%',
   },
-  modalButton: {
+  loadingContainer: {
     flex: 1,
-    marginHorizontal: METRICS.smallMargin,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+  },
+  loadingText: {
+    marginTop: METRICS.baseMargin,
+    fontSize: METRICS.fontSizeRegular,
+    color: COLORS.text,
+  },
+  countBudgetContainer: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+  },
+  budgetText: {
+    fontSize: METRICS.fontSizeSmall,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  overBudget: {
+    color: COLORS.error,
+    fontWeight: 'bold',
+  },
+  actionBarContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    backgroundColor: COLORS.backgroundDark,
+    height: 60,
+    paddingHorizontal: METRICS.baseMargin,
+  },
+  actionButton: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.primary,
+    paddingVertical: METRICS.baseMargin,
+    margin: METRICS.baseMargin,
+    borderRadius: METRICS.borderRadius,
+  },
+  actionButtonDisabled: {
+    backgroundColor: COLORS.textLight,
+  },
+  actionButtonText: {
+    color: COLORS.background,
+    fontWeight: 'bold',
+  },
+  cancelSelectionButton: {
+    padding: METRICS.baseMargin,
+  },
+  cancelSelectionText: {
+    color: COLORS.background,
+    fontWeight: 'bold',
+  },
+  selectedCard: {
+    borderWidth: 2,
+    borderColor: COLORS.primary,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 12,
+  },
+  checkboxContainer: {
+    position: 'absolute',
+    left: 15,
+    top: '50%',
+    transform: [{ translateY: -15 }],
+    zIndex: 1,
+  },
+  checkbox: {
+    width: 30,
+    height: 30,
+    borderWidth: 2.5,
+    borderColor: COLORS.textLight,
+    borderRadius: 8,
+  },
+  checkboxSelected: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
   },
 });

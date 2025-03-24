@@ -8,59 +8,40 @@ import {
 } from 'react-native';
 import { COLORS, METRICS } from '../../constants';
 
-interface CardProps {
+export interface CardProps {
   children: React.ReactNode;
-  style?: StyleProp<ViewStyle>;
   onPress?: () => void;
-  elevation?: number;
-  bordered?: boolean;
+  onLongPress?: () => void;
+  style?: StyleProp<ViewStyle>;
 }
 
-export const Card: React.FC<CardProps> = ({
-  children,
-  style,
-  onPress,
-  elevation = 2,
-  bordered = false,
-}) => {
-  const cardContent = (
-    <View
-      style={[
-        styles.container,
-        { elevation },
-        bordered && styles.bordered,
-        style,
-      ]}>
-      {children}
-    </View>
-  );
-
+export const Card: React.FC<CardProps> = ({ children, onPress, onLongPress, style }) => {
   if (onPress) {
     return (
       <TouchableOpacity
-        activeOpacity={METRICS.activeOpacity}
-        onPress={onPress}>
-        {cardContent}
+        style={[styles.card, style]}
+        onPress={onPress}
+        onLongPress={onLongPress}
+        activeOpacity={0.8}
+      >
+        {children}
       </TouchableOpacity>
     );
   }
 
-  return cardContent;
+  return <View style={[styles.card, style]}>{children}</View>;
 };
 
 const styles = StyleSheet.create({
-  container: {
+  card: {
     backgroundColor: COLORS.background,
     borderRadius: METRICS.borderRadius,
     padding: METRICS.baseMargin,
     marginVertical: METRICS.smallMargin,
     shadowColor: COLORS.text,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 8,
   },
-  bordered: {
-    borderWidth: 1,
-    borderColor: COLORS.textLight,
-  },
-}); 
+});

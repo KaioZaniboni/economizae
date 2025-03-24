@@ -9,7 +9,7 @@ import {
   TextStyle,
   TextInputProps,
 } from 'react-native';
-import { COLORS, METRICS } from '../../constants';
+import { COLORS, METRICS, TEXT_STYLES } from '../../constants';
 
 interface InputProps extends TextInputProps {
   label?: string;
@@ -46,14 +46,14 @@ export const Input: React.FC<InputProps> = ({
           {label}
         </Text>
       )}
-      
+
       <View style={[
         styles.inputContainer,
         isFocused && styles.inputContainerFocused,
         error && styles.inputContainerError,
       ]}>
         {leftIcon && <View style={styles.iconContainer}>{leftIcon}</View>}
-        
+
         <TextInput
           style={[
             styles.input,
@@ -70,10 +70,10 @@ export const Input: React.FC<InputProps> = ({
           onBlur={() => setIsFocused(false)}
           {...restProps}
         />
-        
+
         {rightIcon && <View style={styles.iconContainer}>{rightIcon}</View>}
       </View>
-      
+
       {error && (
         <Text style={[styles.error, errorStyle]}>
           {error}
@@ -91,6 +91,7 @@ const styles = StyleSheet.create({
     fontSize: METRICS.fontSizeRegular,
     color: COLORS.text,
     marginBottom: METRICS.smallMargin,
+    fontFamily: TEXT_STYLES.body.fontFamily,
   },
   inputContainer: {
     flexDirection: 'row',
@@ -113,6 +114,7 @@ const styles = StyleSheet.create({
     fontSize: METRICS.fontSizeRegular,
     height: '100%',
     paddingHorizontal: METRICS.baseMargin,
+    fontFamily: TEXT_STYLES.body.fontFamily,
   },
   inputWithLeftIcon: {
     paddingLeft: 0,
@@ -129,5 +131,6 @@ const styles = StyleSheet.create({
     color: COLORS.error,
     fontSize: METRICS.fontSizeSmall,
     marginTop: METRICS.smallMargin,
+    fontFamily: TEXT_STYLES.caption.fontFamily,
   },
-}); 
+});

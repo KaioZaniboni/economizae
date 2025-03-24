@@ -5,24 +5,39 @@ import {
   StyleSheet,
   ScrollView,
   Platform,
+  Switch,
 } from 'react-native';
 import { useShoppingList } from '../hooks';
 import { COLORS, METRICS } from '../constants';
 import { Card, Button } from '../components/common';
 import { logDebug, simulateDelay } from '../utils/debug';
+import ExampleComponent from '../components/ExampleComponent';
+import { useLogs } from '../contexts/LogContext';
+import useLogNavigation from '../hooks/useLogNavigation';
+import { DebugControls } from '../../App';
 
 const TAG = 'DebugScreen';
 
+// @ts-ignore
 export const DebugScreen: React.FC = () => {
   const [isHermesEnabled, setIsHermesEnabled] = useState<boolean>(false);
   const [deviceInfo, setDeviceInfo] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const { lists, createList, addItem } = useShoppingList();
-  
+  const { logInteraction } = useLogs();
+  const [showButtons, setShowButtons] = useState<boolean>(DebugControls.showButtons);
+  const [showDebugComponent, setShowDebugComponent] = useState<boolean>(DebugControls.showDebugComponent);
+
+  // Adiciona rastreamento de navegação
+  useLogNavigation();
+
   useEffect(() => {
     checkHermesStatus();
     collectDeviceInfo();
-  }, []);
+
+    // Log de tela carregada
+    logInteraction('DebugScreen', 'screen_loaded');
+  }, [logInteraction]);
 
   const checkHermesStatus = () => {
     // @ts-ignore - Verificando se Hermes está habilitado
@@ -32,131 +47,158 @@ export const DebugScreen: React.FC = () => {
   };
 
   const collectDeviceInfo = () => {
-    const info = [
-      `Platform: ${Platform.OS}`,
-      `Version: ${Platform.Version}`,
-      `is Debug: ${__DEV__ ? 'Yes' : 'No'}`,
-    ].join('\n');
-    
+    const info = `
+      Sistema: ${Platform.OS}
+      Versão: ${Platform.Version}
+      Versão RN: ${require('react-native/package.json').version}
+    `;
     setDeviceInfo(info);
-    logDebug(TAG, info);
+    logDebug(TAG, 'Informações do dispositivo coletadas');
   };
 
   const handleSimulateNetworkDelay = async () => {
     setIsLoading(true);
-    logDebug(TAG, 'Simulando atraso de rede...');
-    
+    logInteraction('DebugScreen', 'simulate_network_delay', { duration: 2000 });
+
     try {
       await simulateDelay(2000);
-      logDebug(TAG, 'Simulação de atraso concluída');
+      logDebug(TAG, 'Delay de rede simulado com sucesso');
+    } catch (error) {
+      if (error instanceof Error) {
+        logDebug(TAG, `Erro ao simular delay: ${error.message}`);
+      } else {
+        logDebug(TAG, 'Erro ao simular delay');
+      }
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleSimulateListCreation = async () => {
-    const timestamp = new Date().toISOString();
-    await createList(`Lista de teste ${timestamp}`);
+    logInteraction('DebugScreen', 'simulate_list_creation');
+    await createList(`Lista de teste ${Date.now()}`);
   };
 
   const handleSimulateItemAddition = async () => {
     if (lists.length === 0) {
-      logDebug(TAG, 'Nenhuma lista disponível para adicionar item');
+      logDebug(TAG, 'Nenhuma lista disponível para adicionar itens');
       return;
     }
 
     const listId = lists[0].id;
+    logInteraction('DebugScreen', 'simulate_item_addition', { listId });
+
     await addItem(listId, {
-      name: `Item teste ${new Date().toISOString()}`,
+      name: `Item ${Date.now()}`,
       quantity: Math.floor(Math.random() * 5) + 1,
       unit: 'un',
-      price: parseFloat((Math.random() * 50).toFixed(2)),
+      price: parseFloat((Math.random() * 100).toFixed(2)),
       category: 'Teste',
     });
   };
 
   const handleThrowError = () => {
-    throw new Error('Erro simulado para teste de depuração');
+    logInteraction('DebugScreen', 'simulate_error');
+    throw new Error('Erro simulado para teste!');
+  };
+
+  const handleToggleButtons = (value: boolean) => {
+    setShowButtons(value);
+    DebugControls.setShowButtons(value);
+    logInteraction('DebugScreen', 'toggle_debug_buttons', { visible: value });
+  };
+
+  const handleToggleDebugComponent = (value: boolean) => {
+    setShowDebugComponent(value);
+    DebugControls.setShowDebugComponent(value);
+    logInteraction('DebugScreen', 'toggle_debug_component', { visible: value });
   };
 
   return (
     <ScrollView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Ferramentas de Depuração</Text>
-      </View>
+      <Text style={styles.title}>Tela de Depuração</Text>
 
+      {/* Controle de visibilidade dos botões Debug/Logs */}
       <Card style={styles.card}>
-        <Text style={styles.sectionTitle}>Informações do Ambiente</Text>
-        
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Modo:</Text>
-          <Text style={styles.infoValue}>{__DEV__ ? 'Desenvolvimento' : 'Produção'}</Text>
+        <Text style={styles.sectionTitle}>Controle de Interface</Text>
+        <View style={styles.toggleRow}>
+          <Text style={styles.label}>Mostrar botões DEBUG/LOGS:</Text>
+          <Switch
+            value={showButtons}
+            onValueChange={handleToggleButtons}
+            trackColor={{ false: '#767577', true: COLORS.primary }}
+            thumbColor={showButtons ? COLORS.accent : '#f4f3f4'}
+          />
         </View>
-        
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Hermes:</Text>
-          <View style={styles.statusContainer}>
-            <Text style={styles.infoValue}>
-              {isHermesEnabled ? 'Ativado' : 'Desativado'}
-            </Text>
-            <View 
-              style={[
-                styles.statusIndicator, 
-                { backgroundColor: isHermesEnabled ? COLORS.success : COLORS.error }
-              ]} 
-            />
-          </View>
+        <Text style={styles.helpText}>
+          Quando desativado, os botões flutuantes DEBUG e LOGS ficarão escondidos para melhor visualização das telas
+        </Text>
+
+        <View style={[styles.toggleRow, styles.toggleSeparator]}>
+          <Text style={styles.label}>Mostrar componente de depuração:</Text>
+          <Switch
+            value={showDebugComponent}
+            onValueChange={handleToggleDebugComponent}
+            trackColor={{ false: '#767577', true: COLORS.primary }}
+            thumbColor={showDebugComponent ? COLORS.accent : '#f4f3f4'}
+          />
         </View>
-        
-        <Text style={styles.infoLabel}>Dispositivo:</Text>
-        <Text style={styles.deviceInfo}>{deviceInfo}</Text>
+        <Text style={styles.helpText}>
+          Quando ativado, exibe o card de depuração nas telas para confirmar que a renderização está funcionando
+        </Text>
+      </Card>
+
+      {/* Componente de exemplo com logs */}
+      <Card style={styles.card}>
+        <Text style={styles.sectionTitle}>Componente com Logs</Text>
+        {/* @ts-ignore - Componente de exemplo */}
+        <ExampleComponent />
       </Card>
 
       <Card style={styles.card}>
-        <Text style={styles.sectionTitle}>Simulações para Teste</Text>
-        
+        <Text style={styles.sectionTitle}>Informações do Ambiente</Text>
+        <Text style={styles.label}>Hermes Engine:</Text>
+        <Text style={styles.value}>
+          {isHermesEnabled ? 'Ativado ✓' : 'Desativado ✗'}
+        </Text>
+
+        <Text style={styles.label}>Dispositivo:</Text>
+        <Text style={styles.value}>{deviceInfo}</Text>
+      </Card>
+
+      <Card style={styles.card}>
+        <Text style={styles.sectionTitle}>Testes de Performance</Text>
         <Button
-          title="Simular Atraso de Rede (2s)"
+          title="Simular Delay de Rede (2s)"
           onPress={handleSimulateNetworkDelay}
           loading={isLoading}
-          style={styles.button}
         />
-        
+      </Card>
+
+      <Card style={styles.card}>
+        <Text style={styles.sectionTitle}>Operações de Dados</Text>
         <Button
-          title="Criar Lista de Teste"
+          title="Criar Lista de Compras"
           onPress={handleSimulateListCreation}
           style={styles.button}
         />
-        
+        <View style={styles.buttonSpacer} />
         <Button
-          title="Adicionar Item de Teste"
+          title="Adicionar Item na Primeira Lista"
           onPress={handleSimulateItemAddition}
+          disabled={lists.length === 0}
           style={styles.button}
         />
-        
+      </Card>
+
+      <Card style={styles.card}>
+        <Text style={styles.sectionTitle}>Testes de Erro</Text>
         <Button
-          title="Simular Erro"
+          title="Lançar Erro Não Tratado"
           onPress={handleThrowError}
           type="outline"
           style={styles.button}
         />
-      </Card>
-
-      <Card style={styles.card}>
-        <Text style={styles.sectionTitle}>Estado Atual</Text>
-        <Text style={styles.infoLabel}>Listas:</Text>
-        <Text style={styles.infoValue}>{lists.length} listas encontradas</Text>
-        
-        {lists.length > 0 && (
-          <View style={styles.listsContainer}>
-            {lists.map((list) => (
-              <View key={list.id} style={styles.listItem}>
-                <Text style={styles.listName}>{list.name}</Text>
-                <Text style={styles.listItemCount}>{list.items.length} itens</Text>
-              </View>
-            ))}
-          </View>
-        )}
       </Card>
     </ScrollView>
   );
@@ -165,80 +207,57 @@ export const DebugScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.backgroundDark,
+    backgroundColor: COLORS.background,
   },
-  header: {
-    padding: METRICS.sectionPadding,
-    backgroundColor: COLORS.primary,
-  },
-  headerTitle: {
-    fontSize: METRICS.fontSizeHeader,
+  title: {
+    fontSize: METRICS.fontSizeLarge,
     fontWeight: 'bold',
-    color: COLORS.background,
+    color: COLORS.text,
+    margin: METRICS.doubleBaseMargin,
+    textAlign: 'center',
   },
   card: {
     marginHorizontal: METRICS.baseMargin,
-    marginTop: METRICS.baseMargin,
+    marginVertical: METRICS.smallMargin,
   },
   sectionTitle: {
-    fontSize: METRICS.fontSizeLarge,
+    fontSize: METRICS.fontSizeMedium,
     fontWeight: 'bold',
-    marginBottom: METRICS.baseMargin,
     color: COLORS.text,
+    marginBottom: METRICS.baseMargin,
   },
-  infoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: METRICS.smallMargin,
-  },
-  infoLabel: {
-    fontSize: METRICS.fontSizeRegular,
+  label: {
+    fontSize: METRICS.fontSizeSmall,
     color: COLORS.textSecondary,
     marginBottom: METRICS.smallMargin,
   },
-  infoValue: {
+  value: {
     fontSize: METRICS.fontSizeRegular,
     color: COLORS.text,
-    fontWeight: '500',
+    marginBottom: METRICS.baseMargin,
   },
-  deviceInfo: {
-    fontSize: METRICS.fontSizeRegular,
-    color: COLORS.text,
-    backgroundColor: COLORS.backgroundDark,
-    padding: METRICS.baseMargin,
-    borderRadius: METRICS.borderRadius,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  buttonSpacer: {
+    height: METRICS.baseMargin,
   },
   button: {
     marginBottom: METRICS.baseMargin,
   },
-  statusContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statusIndicator: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginLeft: METRICS.smallMargin,
-  },
-  listsContainer: {
-    marginTop: METRICS.baseMargin,
-  },
-  listItem: {
+  toggleRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    padding: METRICS.smallMargin,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.textLight,
+    alignItems: 'center',
+    marginBottom: METRICS.smallMargin,
   },
-  listName: {
-    fontSize: METRICS.fontSizeRegular,
-    color: COLORS.text,
-  },
-  listItemCount: {
+  helpText: {
     fontSize: METRICS.fontSizeSmall,
     color: COLORS.textSecondary,
+    fontStyle: 'italic',
+    marginTop: METRICS.smallMargin,
   },
-}); 
+  toggleSeparator: {
+    marginTop: METRICS.baseMargin,
+    paddingTop: METRICS.baseMargin,
+    borderTopWidth: 0.5,
+    borderTopColor: COLORS.textSecondary,
+  },
+});
