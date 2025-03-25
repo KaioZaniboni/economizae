@@ -39,9 +39,9 @@ const styles = StyleSheet.create({
     padding: METRICS.baseMargin,
     marginVertical: METRICS.smallMargin,
     shadowColor: COLORS.text,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 12,
   },
 });

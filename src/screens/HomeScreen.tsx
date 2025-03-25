@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -16,9 +16,13 @@ import { COLORS, METRICS } from '../constants';
 import { useShoppingList } from '../hooks';
 import { Card, Button } from '../components/common';
 import { ShoppingList } from '../types';
+import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../navigation/AppNavigator';
 
 export const HomeScreen = () => {
-  const { lists, loading, error, createList, updateList, deleteList } = useShoppingList();
+  const { lists, loading, error, createList, updateList, deleteList, refreshLists } = useShoppingList();
   const [modalVisible, setModalVisible] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [newListName, setNewListName] = useState('');
@@ -27,7 +31,31 @@ export const HomeScreen = () => {
   const [selectedList, setSelectedList] = useState<ShoppingList | null>(null);
   const [selectedLists, setSelectedLists] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
+  // Atualizar dados quando a tela receber foco
+  useFocusEffect(
+    useCallback(() => {
+      const loadData = async () => {
+        setIsRefreshing(true);
+        try {
+          // Recarregar as listas do AsyncStorage
+          await refreshLists();
+        } catch (error) {
+          console.error('Erro ao atualizar listas:', error);
+        } finally {
+          setIsRefreshing(false);
+        }
+      };
+
+      loadData();
+
+      // Função de limpeza para o efeito (opcional)
+      return () => {};
+    }, [refreshLists])
+  );
 
   // Formatar o valor monetário quando o usuário digita
   const formatCurrency = (value: string) => {
@@ -259,18 +287,9 @@ export const HomeScreen = () => {
 
   // Excluir as listas selecionadas
   const handleDeleteSelected = () => {
-    if (selectedLists.size === 0) {
-      return;
-    }
-
-    const count = selectedLists.size;
-    const mensagem = count === 1
-      ? 'Tem certeza que deseja excluir esta lista de compras?'
-      : `Tem certeza que deseja excluir estas ${count} listas de compras?`;
-
     Alert.alert(
-      'Excluir Lista(s)',
-      mensagem,
+      'Confirmar exclusão',
+      `Tem certeza que deseja excluir ${selectedLists.size === 1 ? 'esta lista' : 'estas listas'}?`,
       [
         {
           text: 'Cancelar',
@@ -278,23 +297,16 @@ export const HomeScreen = () => {
         },
         {
           text: 'Excluir',
-          onPress: () => {
+          onPress: async () => {
             try {
-              // Excluir cada lista selecionada
-              const deletePromises = Array.from(selectedLists).map(listId =>
-                deleteList(listId)
-              );
-
-              Promise.all(deletePromises)
-                .then(() => {
-                  // Limpar seleção após exclusão
-                  cancelSelectionMode();
-                })
-                .catch(() => {
-                  Alert.alert('Erro', 'Não foi possível excluir uma ou mais listas');
-                });
+              for (const listId of selectedLists) {
+                await deleteList(listId);
+              }
+              // Sair do modo de seleção
+              setSelectedLists(new Set());
+              setSelectionMode(false);
             } catch (error) {
-              Alert.alert('Erro', 'Não foi possível excluir as listas');
+              Alert.alert('Erro', 'Não foi possível excluir uma ou mais listas');
             }
           },
           style: 'destructive',
@@ -324,10 +336,22 @@ export const HomeScreen = () => {
     // Verificar se este item está selecionado
     const isSelected = selectedLists.has(item.id);
 
+    // Calcular o total baseado nos itens da lista, caso não exista
+    const total = item.total !== undefined ? item.total :
+                 item.items.reduce((sum, i) => sum + ((i.price || 0) * i.quantity), 0);
+
+    // Formatar o total como moeda
+    const formattedTotal = `R$ ${total.toFixed(2).replace('.', ',')}`;
+
     return (
       <Card
         onPress={() => {
-          toggleListSelection(item.id);
+          if (selectionMode) {
+            toggleListSelection(item.id);
+          } else {
+            // Navegar para a tela de detalhes quando não estiver no modo de seleção
+            navigation.navigate('ShoppingListDetails', { listId: item.id });
+          }
         }}
         style={isSelected ? styles.selectedCard : undefined}
       >
@@ -363,12 +387,12 @@ export const HomeScreen = () => {
               </Text>
               {item.budget !== undefined && (
                 <Text style={styles.budgetText}>
-                  Orçamento: R$ {item.budget.toFixed(2)}
+                  Orçamento: R$ {item.budget.toFixed(2).replace('.', ',')}
                 </Text>
               )}
             </View>
             <Text style={[styles.listTotal, isOverBudget && styles.overBudget]}>
-              Total: R$ {item.total?.toFixed(2) || '0.00'}
+              Total: {formattedTotal}
             </Text>
           </View>
         </View>
@@ -427,6 +451,15 @@ export const HomeScreen = () => {
           renderItem={renderListItem}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContainer}
+          refreshing={isRefreshing}
+          onRefresh={async () => {
+            setIsRefreshing(true);
+            try {
+              await refreshLists();
+            } finally {
+              setIsRefreshing(false);
+            }
+          }}
         />
       )}
 
@@ -678,7 +711,11 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 5,
+    elevation: 12,
+    shadowColor: COLORS.shadowColor,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
   },
   addButtonText: {
     fontSize: 24,
@@ -698,7 +735,11 @@ const styles = StyleSheet.create({
     borderRadius: METRICS.borderRadius,
     padding: METRICS.sectionPadding,
     alignItems: 'center',
-    elevation: 5,
+    elevation: 12,
+    shadowColor: COLORS.shadowColor,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
   },
   modalTitle: {
     fontSize: METRICS.fontSizeMedium,

@@ -6,6 +6,7 @@ import { Text, View, StyleSheet } from 'react-native';
 import { COLORS, FONTS } from '../constants';
 import { HomeScreen } from '../screens/HomeScreen';
 import { DebugScreen } from '../screens/DebugScreen';
+import { ShoppingListDetailsScreen } from '../screens/ShoppingListDetailsScreen';
 
 // Tema de navegação para garantir que as cores sejam aplicadas corretamente
 const navigationTheme = {
@@ -137,6 +138,14 @@ export const AppNavigator = () => {
           name="Main"
           component={MainTabNavigator}
           options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="ShoppingListDetails"
+          component={ShoppingListDetailsScreen}
+          options={{
+            title: 'Detalhes da Lista',
+            // O título será atualizado dinamicamente no componente
+          }}
         />
         {/* Outras telas serão adicionadas posteriormente */}
       </Stack.Navigator>
