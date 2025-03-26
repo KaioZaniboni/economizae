@@ -7,6 +7,7 @@ import {
   useErrorNotification,
   useSuccessNotification,
 } from '../contexts/NotificationContext';
+import {clearCollapsedSectionsData} from '../utils/storage';
 
 // Tag para identificar logs deste componente
 const TAG = 'useShoppingList';
@@ -517,38 +518,37 @@ export const useShoppingList = () => {
     [lists, showErrorNotification, showSuccessNotification],
   );
 
-  // deleteList - versão minimalista sem problemas de tipagem
-  const deleteList = (listId: string): Promise<void> => {
-    if (!listId) {
-      const error = new Error('ID da lista é obrigatório');
-      setError('Erro ao excluir lista');
-      logError(TAG, `${error}`);
-      showErrorNotification(`Erro ao excluir lista: ${error.message}`);
-      return Promise.reject(error);
-    }
+  // Excluir uma lista
+  const deleteList = useCallback(
+    async (listId: string): Promise<boolean> => {
+      try {
+        logDebug(TAG, `Excluindo lista: ${listId}`);
 
-    // Filtrar sem acessar propriedades além do ID
-    const updatedLists = lists.filter(l => l.id !== listId);
+        const updatedLists = lists.filter(list => list.id !== listId);
 
-    // Atualizar o estado
-    setLists(updatedLists);
+        // Atualizar estado local
+        setLists(updatedLists);
 
-    // Persistir e retornar
-    return saveLists(updatedLists)
-      .then(() => {
+        // Persistir no storage
+        await saveLists(updatedLists);
+
+        // Limpar dados persistidos das categorias desta lista
+        await clearCollapsedSectionsData(listId);
+
+        logDebug(TAG, `Lista ${listId} excluída com sucesso`);
         showSuccessNotification('Lista excluída com sucesso');
-      })
-      .catch(err => {
-        setError('Erro ao excluir lista');
-        logError(TAG, `${err}`);
-        showErrorNotification(
-          `Erro ao excluir lista: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-        throw err;
-      });
-  };
+
+        return true;
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        logError(TAG, `Erro ao excluir lista: ${errorMessage}`);
+        showErrorNotification(`Erro ao excluir lista: ${errorMessage}`);
+        throw error;
+      }
+    },
+    [lists, showErrorNotification, showSuccessNotification],
+  );
 
   // Obter uma lista específica por ID
   const getListById = useCallback(

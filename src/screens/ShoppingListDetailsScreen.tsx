@@ -16,6 +16,7 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
   SectionList,
+  Button,
 } from 'react-native';
 import { RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -27,6 +28,7 @@ import { Item, ShoppingList } from '../types';
 import { logDebug, logError } from '../utils/debug';
 import { withRetry } from '../utils/errorHandler';
 import { useErrorNotification, useSuccessNotification } from '../contexts/NotificationContext';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 // Tag para identificar logs deste componente
 const TAG = 'ShoppingListDetailsScreen';
@@ -172,32 +174,31 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
   const [formattedPrice, setFormattedPrice] = useState('R$ 0,00');
   const [itemCategory, setItemCategory] = useState('outros');
 
-  // Usar o hook personalizado para gerenciar o estado de colapso das categorias
-  const categoryIds = useMemo(() => CATEGORIES.map(cat => cat.id), []);
-  const {
-    collapsedSections,
-    toggleSection,
-    expandAll,
-    collapseAll,
-  } = useSectionCollapse(categoryIds, false);
+  // Gerenciamento do estado de colapso de seções com persistência usando o hook personalizado
+  const { sections, collapsedSections, toggleSection, toggleAll, isCollapsed } = useSectionCollapse(
+    useMemo(() => {
+      // Obter array de IDs de categorias para inicializar o estado de colapso
+      return list?.items
+        ? Array.from(new Set(list.items.map(item => item.category || 'Sem categoria')))
+        : [];
+    }, [list?.items]),
+    false, // Inicialmente expandido
+    `collapsedSections-list-${listId}` // Chave única para este list ID
+  );
 
-  // Forçar expansão de todas as categorias quando a lista for carregada ou quando mudar
+  // Log para verificar a persistência
   useEffect(() => {
-    if (list?.items?.length > 0) {
-      logDebug(TAG, `Lista carregada com ${list.items.length} itens. Expandindo todas as categorias.`);
-
-      // Usar um timeout para garantir que a expansão ocorra após a renderização
-      const timeout = setTimeout(() => {
-        expandAll();
-        logDebug(TAG, 'Categorias expandidas via timeout');
-      }, 100);
-
-      return () => {
-        clearTimeout(timeout);
-        logDebug(TAG, 'Timeout de expansão limpo');
-      };
+    if (list?.items?.length) {
+      logDebug('ShoppingListDetails',
+        `Lista ${listId} carregada com ${list.items.length} itens. ` +
+        `Estado persistido: ${Object.keys(collapsedSections).length} categorias. ` +
+        `Categorias colapsadas: ${Object.entries(collapsedSections)
+          .filter(([_, collapsed]) => collapsed)
+          .map(([key]) => key)
+          .join(', ') || 'nenhuma'}`
+      );
     }
-  }, [list?.id, expandAll]);
+  }, [list?.items, collapsedSections, listId]);
 
   const showErrorNotification = useErrorNotification();
   const showSuccessNotification = useSuccessNotification();
@@ -708,55 +709,67 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
     <View style={styles.container}>
       {/* Cabeçalho com orçamento e total */}
       <View style={styles.header}>
-        <View style={styles.budgetContainer}>
-          <Text style={styles.label}>Orçamento:</Text>
-          <Text style={[
-            styles.budgetText,
-            isOverBudget() && styles.overBudget,
-          ]}>
-            {list.budget !== undefined
-              ? `R$ ${list.budget.toFixed(2).replace('.', ',')}`
-              : 'Não definido'}
-          </Text>
+        <View style={styles.headerRow}>
+          <View style={styles.budgetContainer}>
+            <Text style={styles.label}>Orçamento:</Text>
+            <Text style={[
+              styles.budgetText,
+              isOverBudget() && styles.overBudget,
+            ]}>
+              {list.budget !== undefined
+                ? `R$ ${list.budget.toFixed(2).replace('.', ',')}`
+                : 'Não definido'}
+            </Text>
+          </View>
+
+          <View style={styles.totalContainer}>
+            <Text style={styles.label}>Total:</Text>
+            <Text style={[
+              styles.totalValue,
+              isOverBudget() && styles.overBudget,
+            ]}>
+              {list.total !== undefined
+                ? `R$ ${list.total.toFixed(2).replace('.', ',')}`
+                : 'R$ 0,00'}
+            </Text>
+          </View>
         </View>
 
-        <View style={styles.totalContainer}>
-          <Text style={styles.label}>Total:</Text>
-          <Text style={[
-            styles.totalValue,
-            isOverBudget() && styles.overBudget,
-          ]}>
-            {list.total !== undefined
-              ? `R$ ${list.total.toFixed(2).replace('.', ',')}`
-              : 'R$ 0,00'}
-          </Text>
-        </View>
+        {list.items.length > 0 && (
+          <View style={styles.headerButtons}>
+            <TouchableOpacity
+              style={[styles.headerButton, styles.expandButton]}
+              onPress={() => {
+                logDebug(TAG, 'Botão "Expandir tudo" clicado');
+                toggleAll();
+              }}
+            >
+              <Icon
+                name="expand-all"
+                type="material-community"
+                size={18}
+                color={COLORS.primary}
+              />
+              <Text style={styles.headerButtonText}>Expandir</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.headerButton, styles.collapseButton]}
+              onPress={() => {
+                logDebug(TAG, 'Botão "Recolher tudo" clicado');
+                toggleAll();
+              }}
+            >
+              <Icon
+                name="collapse-all"
+                type="material-community"
+                size={18}
+                color={COLORS.primary}
+              />
+              <Text style={styles.headerButtonText}>Recolher</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
-
-      {/* Ações de expansão/colapsamento em uma barra separada */}
-      {list.items.length > 0 && (
-        <View style={styles.collapseActions}>
-          <TouchableOpacity
-            style={styles.collapseButton}
-            onPress={() => {
-              logDebug(TAG, 'Botão "Expandir tudo" clicado');
-              expandAll();
-            }}
-          >
-            <Text style={styles.collapseButtonText}>Expandir tudo</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.collapseButton}
-            onPress={() => {
-              logDebug(TAG, 'Botão "Recolher tudo" clicado');
-              collapseAll();
-            }}
-          >
-            <Text style={styles.collapseButtonText}>Recolher tudo</Text>
-          </TouchableOpacity>
-        </View>
-      )}
 
       {/* Lista de itens com otimização de performance */}
       {list.items.length > 0 ? (
@@ -932,24 +945,35 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: 'column',
     padding: METRICS.padding.md,
     backgroundColor: COLORS.background,
-    elevation: 8,
-    shadowColor: COLORS.shadowColor,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.backgroundDark,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
     shadowRadius: 8,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
   },
   budgetContainer: {
     flex: 1,
-    marginRight: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   totalContainer: {
     flex: 1,
-    marginLeft: 8,
-    alignItems: 'flex-end',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
   },
   label: {
     fontSize: 14,
@@ -1324,26 +1348,37 @@ const styles = StyleSheet.create({
   listContent: {
     padding: METRICS.padding.md,
   },
-  collapseActions: {
+  headerButtons: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingVertical: METRICS.padding.xs,
-    paddingHorizontal: METRICS.padding.md,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.backgroundDark,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.backgroundLight,
   },
-  collapseButton: {
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    marginLeft: 8,
-    backgroundColor: COLORS.backgroundLight,
+  headerButton: {
+    padding: METRICS.padding.xs,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.background,
     borderRadius: METRICS.borderRadii.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 6,
+    paddingHorizontal: 15,
+    paddingVertical: 8,
   },
-  collapseButtonText: {
-    fontSize: 12,
+  headerButtonText: {
+    fontSize: 14,
     color: COLORS.primary,
+    marginLeft: 6,
     fontWeight: '500',
   },
+  expandButton: {
+    marginRight: 4,
+  },
+  collapseButton: {},
   errorContainer: {
     flex: 1,
     padding: METRICS.padding.lg,

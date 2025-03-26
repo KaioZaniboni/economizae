@@ -224,3 +224,144 @@ export const saveAppSettings = async (settings: unknown): Promise<void> => {
 export const getAppSettings = async <T>(): Promise<T | null> => {
   return StorageUtil.getItem<T>(STORAGE_KEYS.APP_SETTINGS);
 };
+
+/**
+ * Verifica se o AsyncStorage está funcionando corretamente
+ * @returns Promise<boolean> true se o AsyncStorage está funcionando
+ */
+export const checkAsyncStorageConnection = async (): Promise<boolean> => {
+  const testKey = 'asyncStorage_test_key';
+  const testValue = 'test_value_' + Date.now();
+
+  try {
+    await AsyncStorage.setItem(testKey, testValue);
+    const result = await AsyncStorage.getItem(testKey);
+    await AsyncStorage.removeItem(testKey);
+
+    const isConnected = result === testValue;
+    logDebug(
+      TAG,
+      `AsyncStorage conexão verificada: ${
+        isConnected ? 'Funcionando' : 'Falha'
+      }`,
+    );
+
+    return isConnected;
+  } catch (error) {
+    logError(TAG, `Erro ao verificar conexão AsyncStorage: ${error}`);
+    return false;
+  }
+};
+
+/**
+ * Limpar os dados persistidos de categorias colapsáveis
+ * @param listId ID da lista para limpar os dados
+ * @returns Promise<boolean> true se a operação foi bem-sucedida
+ */
+export const clearCollapsedSectionsData = async (
+  listId: string,
+): Promise<boolean> => {
+  const key = `collapsedSections-list-${listId}`;
+
+  try {
+    await AsyncStorage.removeItem(key);
+    logDebug(
+      TAG,
+      `Dados de categorias colapsáveis removidos para a lista ${listId}`,
+    );
+    return true;
+  } catch (error) {
+    logError(TAG, `Erro ao remover dados de categorias colapsáveis: ${error}`);
+    return false;
+  }
+};
+
+/**
+ * Limpar todos os dados persistidos de categorias colapsáveis
+ * @returns Promise<boolean> true se a operação foi bem-sucedida
+ */
+export const clearAllCollapsedSectionsData = async (): Promise<boolean> => {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const collapsedSectionsKeys = keys.filter(key =>
+      key.startsWith('collapsedSections-list-'),
+    );
+
+    if (collapsedSectionsKeys.length > 0) {
+      await AsyncStorage.multiRemove(collapsedSectionsKeys);
+      logDebug(
+        TAG,
+        `Todos os dados de categorias colapsáveis removidos (${collapsedSectionsKeys.length} registros)`,
+      );
+    } else {
+      logDebug(
+        TAG,
+        'Nenhum dado de categorias colapsáveis encontrado para remover',
+      );
+    }
+
+    return true;
+  } catch (error) {
+    logError(
+      TAG,
+      `Erro ao remover todos os dados de categorias colapsáveis: ${error}`,
+    );
+    return false;
+  }
+};
+
+/**
+ * Inspeciona e imprime todas as chaves de seções colapsadas e seus valores
+ * Útil para depuração e diagnóstico
+ */
+export const inspectCollapsedSectionsData = async (): Promise<void> => {
+  try {
+    const allKeys = await AsyncStorage.getAllKeys();
+    const collapsedKeys = allKeys.filter(key =>
+      key.startsWith('collapsedSections'),
+    );
+
+    if (collapsedKeys.length === 0) {
+      logDebug('Storage', 'Nenhum dado de seções colapsadas encontrado');
+      return;
+    }
+
+    logDebug(
+      'Storage',
+      `Encontrados ${collapsedKeys.length} registros de seções colapsadas:`,
+    );
+
+    // Buscar e mostrar cada registro
+    for (const key of collapsedKeys) {
+      try {
+        const value = await AsyncStorage.getItem(key);
+        if (value) {
+          const parsed = JSON.parse(value);
+          const totalSections = Object.keys(parsed).length;
+          const collapsedCount = Object.values(parsed).filter(Boolean).length;
+
+          logDebug('Storage', `- ${key}:`);
+          logDebug(
+            'Storage',
+            `  Total: ${totalSections} seções, ${collapsedCount} colapsadas`,
+          );
+          logDebug(
+            'Storage',
+            `  Seções colapsadas: ${
+              Object.entries(parsed)
+                .filter(([_, collapsed]) => collapsed)
+                .map(([key]) => key)
+                .join(', ') || 'nenhuma'
+            }`,
+          );
+        } else {
+          logDebug('Storage', `- ${key}: valor vazio`);
+        }
+      } catch (error) {
+        logDebug('Storage', `Erro ao ler ${key}: ${error}`);
+      }
+    }
+  } catch (error) {
+    logDebug('Storage', `Erro ao inspecionar dados de seções: ${error}`);
+  }
+};
