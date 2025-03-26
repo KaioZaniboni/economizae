@@ -20,9 +20,12 @@ import { useNavigation } from '@react-navigation/native';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
+import { useErrorNotification, useSuccessNotification } from '../contexts/NotificationContext';
 
 export const HomeScreen = () => {
   const { lists, loading, error, createList, updateList, deleteList, refreshLists } = useShoppingList();
+  const showErrorNotification = useErrorNotification();
+  const showSuccessNotification = useSuccessNotification();
   const [modalVisible, setModalVisible] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [newListName, setNewListName] = useState('');
@@ -45,6 +48,7 @@ export const HomeScreen = () => {
           await refreshLists();
         } catch (error) {
           console.error('Erro ao atualizar listas:', error);
+          showErrorNotification('Não foi possível atualizar as listas');
         } finally {
           setIsRefreshing(false);
         }
@@ -54,7 +58,7 @@ export const HomeScreen = () => {
 
       // Função de limpeza para o efeito (opcional)
       return () => {};
-    }, [refreshLists])
+    }, [refreshLists, showErrorNotification])
   );
 
   // Formatar o valor monetário quando o usuário digita
@@ -287,32 +291,49 @@ export const HomeScreen = () => {
 
   // Excluir as listas selecionadas
   const handleDeleteSelected = () => {
-    Alert.alert(
-      'Confirmar exclusão',
-      `Tem certeza que deseja excluir ${selectedLists.size === 1 ? 'esta lista' : 'estas listas'}?`,
-      [
-        {
-          text: 'Cancelar',
-          style: 'cancel',
-        },
-        {
-          text: 'Excluir',
-          onPress: async () => {
-            try {
-              for (const listId of selectedLists) {
-                await deleteList(listId);
-              }
-              // Sair do modo de seleção
-              setSelectedLists(new Set());
-              setSelectionMode(false);
-            } catch (error) {
-              Alert.alert('Erro', 'Não foi possível excluir uma ou mais listas');
+    if (selectedLists.size === 0) {return;}
+
+    // Confirmação para excluir uma ou mais listas
+    const message =
+      selectedLists.size === 1
+        ? 'Tem certeza que deseja excluir esta lista?'
+        : `Tem certeza que deseja excluir ${selectedLists.size} listas?`;
+
+    Alert.alert('Confirmação', message, [
+      {
+        text: 'Cancelar',
+        style: 'cancel',
+      },
+      {
+        text: 'Excluir',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            // Criar um array com os IDs das listas selecionadas
+            const listsToDelete = Array.from(selectedLists);
+
+            // Excluir cada lista selecionada
+            for (const listId of listsToDelete) {
+              await deleteList(listId);
             }
-          },
-          style: 'destructive',
+
+            // Limpar seleção e sair do modo de seleção
+            setSelectedLists(new Set());
+            setSelectionMode(false);
+
+            // Mostrar notificação de sucesso
+            if (listsToDelete.length === 1) {
+              showSuccessNotification('Lista excluída com sucesso');
+            } else {
+              showSuccessNotification(`${listsToDelete.length} listas excluídas com sucesso`);
+            }
+          } catch (error) {
+            console.error('Erro ao excluir listas:', error);
+            showErrorNotification('Não foi possível excluir as listas selecionadas');
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   // Renderizar a tela de carregamento

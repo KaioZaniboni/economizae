@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  FlatList,
   TouchableOpacity,
   TextInput,
   Alert,
@@ -11,15 +10,23 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  StyleProp,
+  ViewStyle,
+  ScrollView,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
+  SectionList,
 } from 'react-native';
 import { RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { COLORS, METRICS } from '../constants';
-import { useShoppingList } from '../hooks';
-import { Card } from '../components/common';
+import { useShoppingList, useSectionCollapse } from '../hooks';
+import { Card, CollapsibleSection } from '../components/common';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { Item, ShoppingList } from '../types';
 import { logDebug, logError } from '../utils/debug';
+import { withRetry } from '../utils/errorHandler';
+import { useErrorNotification, useSuccessNotification } from '../contexts/NotificationContext';
 
 // Tag para identificar logs deste componente
 const TAG = 'ShoppingListDetailsScreen';
@@ -46,6 +53,109 @@ type ShoppingListDetailsScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList>;
 };
 
+// Modificar o componente HorizontalSelector para voltar os botões ao formato anterior
+const HorizontalSelector = ({
+  items,
+  renderItem,
+  style,
+  showButtons = true,
+}: {
+  items: any[];
+  renderItem: (item: any) => React.ReactNode;
+  style?: StyleProp<ViewStyle>;
+  showButtons?: boolean;
+}) => {
+  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollPosition = useRef(0);
+  const [showLeftButton, setShowLeftButton] = useState(false);
+  const [showRightButton, setShowRightButton] = useState(true);
+
+  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
+    scrollPosition.current = contentOffset.x;
+    setShowLeftButton(contentOffset.x > 10);
+    setShowRightButton(contentOffset.x < contentSize.width - layoutMeasurement.width - 10);
+  };
+
+  const scrollLeft = () => {
+    if (scrollViewRef.current) {
+      const newPosition = Math.max(0, scrollPosition.current - 150);
+      scrollViewRef.current.scrollTo({ x: newPosition, animated: true });
+    }
+  };
+
+  const scrollRight = () => {
+    if (scrollViewRef.current) {
+      const newPosition = scrollPosition.current + 150;
+      scrollViewRef.current.scrollTo({ x: newPosition, animated: true });
+    }
+  };
+
+  return (
+    <View style={[styles.selectorContainer, style]}>
+      <ScrollView
+        ref={scrollViewRef}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+      >
+        {items.map((item) => renderItem(item))}
+      </ScrollView>
+
+      {showButtons && showLeftButton && (
+        <TouchableOpacity
+          style={styles.leftButton}
+          onPress={scrollLeft}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.scrollIndicatorIcon}>◂</Text>
+        </TouchableOpacity>
+      )}
+
+      {showButtons && showRightButton && (
+        <TouchableOpacity
+          style={styles.rightButton}
+          onPress={scrollRight}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.scrollIndicatorIcon}>▸</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+};
+
+// Tipos para o componente ListNotFoundScreen
+type ListNotFoundScreenProps = {
+  onRetry: () => void;
+  onGoBack: () => void;
+};
+
+// Tela para quando a lista não for encontrada
+const ListNotFoundScreen: React.FC<ListNotFoundScreenProps> = ({ onRetry, onGoBack }) => (
+  <View style={styles.errorContainer}>
+    <Text style={styles.errorTitle}>Lista não encontrada</Text>
+    <Text style={styles.errorText}>
+      Não foi possível encontrar a lista solicitada. Isso pode ocorrer por um dos seguintes motivos:
+    </Text>
+    <View style={styles.errorBullets}>
+      <Text style={styles.errorBullet}>• A lista pode ter sido excluída</Text>
+      <Text style={styles.errorBullet}>• Houve um problema ao acessar o armazenamento</Text>
+      <Text style={styles.errorBullet}>• O ID da lista pode estar incorreto</Text>
+    </View>
+    <View style={styles.errorActions}>
+      <TouchableOpacity style={styles.errorButton} onPress={onRetry}>
+        <Text style={styles.errorButtonText}>Tentar novamente</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={[styles.errorButton, styles.errorButtonSecondary]} onPress={onGoBack}>
+        <Text style={styles.errorButtonSecondaryText}>Voltar</Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+);
+
 export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDetailsScreenProps) => {
   const { listId } = route.params;
   const { getListById, addItem, updateItem, deleteItem, updateList } = useShoppingList();
@@ -62,53 +172,130 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
   const [formattedPrice, setFormattedPrice] = useState('R$ 0,00');
   const [itemCategory, setItemCategory] = useState('outros');
 
+  // Usar o hook personalizado para gerenciar o estado de colapso das categorias
+  const categoryIds = useMemo(() => CATEGORIES.map(cat => cat.id), []);
+  const {
+    collapsedSections,
+    toggleSection,
+    expandAll,
+    collapseAll,
+  } = useSectionCollapse(categoryIds, false);
+
+  // Forçar expansão de todas as categorias quando a lista for carregada ou quando mudar
+  useEffect(() => {
+    if (list?.items?.length > 0) {
+      logDebug(TAG, `Lista carregada com ${list.items.length} itens. Expandindo todas as categorias.`);
+
+      // Usar um timeout para garantir que a expansão ocorra após a renderização
+      const timeout = setTimeout(() => {
+        expandAll();
+        logDebug(TAG, 'Categorias expandidas via timeout');
+      }, 100);
+
+      return () => {
+        clearTimeout(timeout);
+        logDebug(TAG, 'Timeout de expansão limpo');
+      };
+    }
+  }, [list?.id, expandAll]);
+
+  const showErrorNotification = useErrorNotification();
+  const showSuccessNotification = useSuccessNotification();
+
   // Carregar a lista
   const loadList = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      const data = await getListById(listId);
+    let retryCount = 0;
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 1000; // 1 segundo
 
-      if (data) {
-        setList(data);
+    const attemptLoad = async (): Promise<boolean> => {
+      try {
+        if (retryCount > 0) {
+          logDebug(TAG, `Tentativa ${retryCount} de carregar a lista ${listId}`);
+        }
 
-        // Atualizar título da tela
-        navigation.setOptions({
-          title: data.name,
-        });
+        setIsLoading(true);
 
-        // Verificar se o total precisa ser recalculado
-        const calculatedTotal = data.items.reduce((sum, item) => {
-          if (item.price !== undefined) {
-            const itemPrice = parseFloat(String(item.price));
-            const itemQuantity = parseInt(String(item.quantity)) || 1;
+        // Usar a função de retry para carregar a lista com mais robustez
+        const data = await withRetry(
+          () => getListById(listId),
+          2, // máximo de tentativas
+          800, // tempo de espera entre tentativas
+          TAG
+        );
 
-            if (!isNaN(itemPrice) && !isNaN(itemQuantity)) {
-              return sum + (itemPrice * itemQuantity);
+        if (data) {
+          setList(data);
+          logDebug(TAG, `Lista ${listId} carregada com sucesso: ${data.name} (${data.items.length} itens)`);
+
+          // Atualizar título da tela
+          navigation.setOptions({
+            title: data.name,
+          });
+
+          // Verificar se o total precisa ser recalculado
+          const calculatedTotal = data.items.reduce((sum, item) => {
+            if (item.price !== undefined) {
+              const itemPrice = parseFloat(String(item.price));
+              const itemQuantity = parseInt(String(item.quantity)) || 1;
+
+              if (!isNaN(itemPrice) && !isNaN(itemQuantity)) {
+                return sum + (itemPrice * itemQuantity);
+              }
+            }
+            return sum;
+          }, 0);
+
+          // Atualizar o total se estiver diferente
+          if (calculatedTotal !== data.total) {
+            logDebug(TAG, `Atualizando total inconsistente ao carregar: ${calculatedTotal} (era ${data.total})`);
+            try {
+              await updateList(listId, {
+                ...data,
+                total: calculatedTotal,
+              });
+            } catch (updateError) {
+              logError(TAG, `Erro ao atualizar total da lista: ${updateError}`);
+              // Não interromper o fluxo por causa de um erro na atualização do total
             }
           }
-          return sum;
-        }, 0);
+          return true;
+        } else {
+          // Lista não encontrada
+          logDebug(TAG, `Lista não encontrada com ID: ${listId}`);
 
-        // Atualizar o total se estiver diferente
-        if (calculatedTotal !== data.total) {
-          logDebug(TAG, `Atualizando total inconsistente ao carregar: ${calculatedTotal} (era ${data.total})`);
-          updateList(listId, {
-            ...data,
-            total: calculatedTotal,
-          });
+          if (retryCount < MAX_RETRIES) {
+            // Tentar novamente após um breve atraso
+            retryCount++;
+            logDebug(TAG, `Agendando nova tentativa ${retryCount}/${MAX_RETRIES} em ${RETRY_DELAY}ms`);
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+            return attemptLoad();
+          } else {
+            logError(TAG, `Lista não encontrada após ${MAX_RETRIES} tentativas`);
+            setList(null); // Garantir que o estado reflita que a lista não foi encontrada
+            return false;
+          }
         }
-      } else {
-        // Lista não encontrada
-        logDebug(TAG, `Lista não encontrada com ID: ${listId}`);
-        Alert.alert('Erro', 'Lista não encontrada');
-        navigation.goBack();
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logError(TAG, `Erro ao carregar lista: ${errorMessage}`);
+
+        if (retryCount < MAX_RETRIES) {
+          // Tentar novamente após um breve atraso
+          retryCount++;
+          logDebug(TAG, `Agendando nova tentativa ${retryCount}/${MAX_RETRIES} após erro em ${RETRY_DELAY}ms`);
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+          return attemptLoad();
+        } else {
+          setList(null); // Garantir que o estado reflita que houve um erro
+          return false;
+        }
+      } finally {
+        setIsLoading(false);
       }
-    } catch (error) {
-      logError(TAG, `Erro ao carregar lista: ${error}`);
-      Alert.alert('Erro', 'Ocorreu um erro ao carregar os dados da lista');
-    } finally {
-      setIsLoading(false);
-    }
+    };
+
+    return attemptLoad();
   }, [getListById, listId, navigation, updateList]);
 
   useEffect(() => {
@@ -165,7 +352,7 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
   }, [list?.items, list, listId, updateList, calculateTotal]);
 
   // Formatar o valor monetário
-  const formatCurrency = (value: string) => {
+  const formatCurrency = useCallback((value: string) => {
     // Remover todos os caracteres não numéricos
     let numericValue = value.replace(/[^0-9]/g, '');
 
@@ -194,6 +381,15 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
     }
 
     return `R$ ${formattedInteger},${cents}`;
+  }, []);
+
+  // Função para validação da quantidade (aceita apenas números)
+  const handleQuantityChange = (text: string) => {
+    // Permite apenas dígitos
+    const numericValue = text.replace(/[^0-9]/g, '');
+    // Se ficar vazio, define como '1'
+    const finalValue = numericValue === '' ? '1' : numericValue;
+    setItemQuantity(finalValue);
   };
 
   // Atualizar o valor formatado quando o campo for preenchido
@@ -235,8 +431,42 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
     setModalVisible(true);
   };
 
+  // Excluir um item
+  const handleDeleteItem = useCallback((itemId: string) => {
+    Alert.alert(
+      'Confirmar exclusão',
+      'Tem certeza que deseja excluir este item?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Excluir',
+          style: 'destructive',
+          onPress: () => {
+            try {
+              deleteItem(listId, itemId);
+              loadList();
+              showSuccessNotification('Item excluído com sucesso');
+            } catch (error) {
+              showErrorNotification('Não foi possível excluir o item');
+            }
+          },
+        },
+      ]
+    );
+  }, [deleteItem, listId, loadList, showErrorNotification, showSuccessNotification]);
+
+  // Alternar o estado de marcação do item
+  const toggleItemCheck = useCallback(async (itemId: string, checked: boolean) => {
+    try {
+      await updateItem(listId, itemId, { checked: !checked });
+      loadList();
+    } catch (error) {
+      showErrorNotification('Não foi possível atualizar o item');
+    }
+  }, [updateItem, listId, loadList, showErrorNotification]);
+
   // Abrir modal para editar um item existente
-  const handleEditItem = (item: Item) => {
+  const handleEditItem = useCallback((item: Item) => {
     setEditingItem(item);
     setItemName(item.name);
     setItemQuantity(item.quantity.toString());
@@ -253,18 +483,18 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
 
     setItemCategory(item.category || 'outros');
     setModalVisible(true);
-  };
+  }, [formatCurrency]);
 
   // Salvar o item (adicionar novo ou atualizar existente)
   const handleSaveItem = () => {
     if (!itemName.trim()) {
-      Alert.alert('Erro', 'O nome do item é obrigatório');
+      showErrorNotification('O nome do item é obrigatório');
       return;
     }
 
     const quantity = parseInt(itemQuantity) || 1;
     if (quantity <= 0) {
-      Alert.alert('Erro', 'A quantidade deve ser maior que zero');
+      showErrorNotification('A quantidade deve ser maior que zero');
       return;
     }
 
@@ -273,7 +503,7 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
     if (itemPrice) {
       price = parseFloat(itemPrice) / 100;
       if (isNaN(price)) {
-        Alert.alert('Erro', 'Por favor, digite um valor válido para o preço');
+        showErrorNotification('Por favor, digite um valor válido para o preço');
         return;
       }
     }
@@ -288,6 +518,7 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
           price,
           category: itemCategory,
         });
+        showSuccessNotification(`Item "${itemName}" atualizado com sucesso`);
       } else {
         // Adicionar novo item
         addItem(listId, {
@@ -297,149 +528,168 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
           price,
           category: itemCategory,
         });
+        showSuccessNotification(`Item "${itemName}" adicionado à lista`);
       }
 
-      // Fechar o modal e atualizar a lista
+      // Recarregar lista e fechar modal
+      loadList();
       setModalVisible(false);
-      loadList();
     } catch (error) {
-      Alert.alert('Erro', 'Não foi possível salvar o item');
+      showErrorNotification(`Não foi possível ${editingItem ? 'atualizar' : 'adicionar'} o item`);
     }
   };
 
-  // Excluir um item
-  const handleDeleteItem = (itemId: string) => {
-    Alert.alert(
-      'Confirmar exclusão',
-      'Tem certeza que deseja excluir este item?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Excluir',
-          style: 'destructive',
-          onPress: () => {
-            try {
-              deleteItem(listId, itemId);
-              loadList();
-            } catch (error) {
-              Alert.alert('Erro', 'Não foi possível excluir o item');
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  // Alternar o estado de marcação do item
-  const toggleItemCheck = async (itemId: string, checked: boolean) => {
-    try {
-      await updateItem(listId, itemId, { checked: !checked });
-      loadList();
-    } catch (error) {
-      Alert.alert('Erro', 'Não foi possível atualizar o item');
+  // Função para agrupar itens por categoria com memoização
+  const groupItemsByCategory = useCallback(() => {
+    if (!list?.items?.length) {
+      logDebug(TAG, 'Lista vazia ou não carregada, retornando array vazio');
+      return [];
     }
-  };
 
-  // Renderizar categoria
-  const renderCategory = ({ item: category }: { item: typeof CATEGORIES[0] }) => (
-    <TouchableOpacity
-      style={[
-        styles.categoryItem,
-        { backgroundColor: category.color + '30' }, // Cor com transparência
-        itemCategory === category.id && { borderColor: category.color, borderWidth: 2 },
-      ]}
-      onPress={() => setItemCategory(category.id)}
-    >
-      <Text style={styles.categoryText}>{category.name}</Text>
-    </TouchableOpacity>
-  );
+    const startTime = Date.now();
+    logDebug(TAG, `Agrupando ${list.items.length} itens por categoria`);
 
-  // Renderizar unidade
-  const renderUnit = ({ item: unit }: { item: string }) => (
-    <TouchableOpacity
-      style={[
-        styles.unitItem,
-        itemUnit === unit && { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-      ]}
-      onPress={() => setItemUnit(unit)}
-    >
-      <Text
-        style={[styles.unitText, itemUnit === unit && { color: COLORS.background }]}
-      >
-        {unit}
-      </Text>
-    </TouchableOpacity>
-  );
+    const groupedItems: Record<string, Item[]> = {};
 
-  // Renderizar item da lista
-  const renderListItem = ({ item }: { item: Item }) => {
+    // Inicializar grupos vazios para todas as categorias
+    CATEGORIES.forEach(category => {
+      groupedItems[category.id] = [];
+    });
+
+    // Adicionar cada item ao seu respectivo grupo
+    list.items.forEach(item => {
+      const category = item.category || 'outros';
+      if (!groupedItems[category]) {
+        groupedItems[category] = [];
+      }
+      groupedItems[category].push(item);
+    });
+
+    // Converter para array de seções
+    const sections = CATEGORIES
+      .filter(category => groupedItems[category.id]?.length > 0) // Remover categorias vazias
+      .map(category => ({
+        category,
+        data: groupedItems[category.id],
+      }));
+
+    const endTime = Date.now();
+    logDebug(TAG, `Agrupamento concluído em ${endTime - startTime}ms. ${sections.length} categorias com itens.`);
+
+    return sections;
+  }, [list?.items]);
+
+  // Memoizar o resultado para evitar recálculos desnecessários
+  const groupedSections = useMemo(() => {
+    const sections = groupItemsByCategory();
+    logDebug(TAG, `Seções agrupadas memoizadas: ${sections.length} categorias`);
+    return sections;
+  }, [groupItemsByCategory]);
+
+  // Renderizar item da lista para o conteúdo da seção
+  const renderItemForSection = useCallback(({ item }: { item: Item }) => {
     // Encontrar a categoria para obter a cor
     const category = CATEGORIES.find(cat => cat.id === (item.category || 'outros'));
     const categoryColor = category?.color || COLORS.textLight;
 
     return (
-      <Card style={[styles.itemCard, item.checked && styles.checkedItem]}>
-        <TouchableOpacity
-          style={styles.checkBox}
-          onPress={() => toggleItemCheck(item.id, item.checked)}
-        >
-          <View
-            style={[
-              styles.checkBoxInner,
-              item.checked && { backgroundColor: COLORS.primary },
-            ]}
-          />
-        </TouchableOpacity>
+      <View style={styles.itemWrapper}>
+        <Card style={[styles.itemCard, item.checked && styles.checkedItem]}>
+          <TouchableOpacity
+            style={styles.checkBox}
+            onPress={() => toggleItemCheck(item.id, item.checked)}
+          >
+            <View
+              style={[
+                styles.checkBoxInner,
+                item.checked && { backgroundColor: categoryColor },
+              ]}
+            />
+          </TouchableOpacity>
 
-        <View style={styles.itemContent}>
-          <View style={styles.itemHeader}>
-            <Text style={[styles.itemName, item.checked && styles.checkedText]}>{item.name}</Text>
-            <View style={[styles.categoryTag, { backgroundColor: categoryColor + '30' }]}>
-              <Text style={[styles.categoryTagText, { color: categoryColor }]}>
-                {category?.name || 'Outros'}
+          <View style={styles.itemContent}>
+            <View style={styles.itemHeader}>
+              <Text style={[styles.itemName, item.checked && styles.checkedText]}>{item.name}</Text>
+              <View style={[styles.categoryTag, { backgroundColor: categoryColor + '30' }]}>
+                <Text style={[styles.categoryTagText, { color: categoryColor }]}>
+                  {category?.name || 'Outros'}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.itemDetails}>
+              <Text style={styles.itemQuantity}>
+                {item.quantity} {item.unit}
               </Text>
+
+              {item.price !== undefined && (
+                <View style={styles.priceContainer}>
+                  <Text style={styles.itemPrice}>
+                    R$ {(item.price * item.quantity).toFixed(2).replace('.', ',')}
+                  </Text>
+
+                  {item.quantity > 1 && (
+                    <Text style={styles.unitPrice}>
+                      (R$ {item.price.toFixed(2).replace('.', ',')}/un)
+                    </Text>
+                  )}
+                </View>
+              )}
             </View>
           </View>
 
-          <View style={styles.itemDetails}>
-            <Text style={styles.itemQuantity}>
-              {item.quantity} {item.unit}
-            </Text>
+          <View style={styles.itemActions}>
+            <TouchableOpacity
+              style={styles.editButton}
+              onPress={() => handleEditItem(item)}
+            >
+              <Text style={styles.editButtonText}>Editar</Text>
+            </TouchableOpacity>
 
-            {item.price !== undefined && (
-              <View style={styles.priceContainer}>
-                <Text style={styles.itemPrice}>
-                  R$ {(item.price * item.quantity).toFixed(2).replace('.', ',')}
-                </Text>
-
-                {item.quantity > 1 && (
-                  <Text style={styles.unitPrice}>
-                    (R$ {item.price.toFixed(2).replace('.', ',')}/un)
-                  </Text>
-                )}
-              </View>
-            )}
+            <TouchableOpacity
+              style={styles.deleteButton}
+              onPress={() => handleDeleteItem(item.id)}
+            >
+              <Text style={styles.deleteButtonText}>✕</Text>
+            </TouchableOpacity>
           </View>
-        </View>
-
-        <View style={styles.itemActions}>
-          <TouchableOpacity
-            style={styles.editButton}
-            onPress={() => handleEditItem(item)}
-          >
-            <Text style={styles.editButtonText}>Editar</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.deleteButton}
-            onPress={() => handleDeleteItem(item.id)}
-          >
-            <Text style={styles.deleteButtonText}>✕</Text>
-          </TouchableOpacity>
-        </View>
-      </Card>
+        </Card>
+      </View>
     );
-  };
+  }, [handleDeleteItem, handleEditItem, toggleItemCheck]);
+
+  // Renderizar cabeçalho de seção como um botão expansível
+  const renderSectionHeader = useCallback(({ section }: { section: { category: typeof CATEGORIES[0], data: Item[] } }) => {
+    const category = section.category;
+
+    // Obter o estado de colapso da categoria atual
+    const isCollapsed = Boolean(collapsedSections[category.id]);
+
+    logDebug(TAG, `Renderizando seção ${category.name} (id: ${category.id}). Estado de colapso: ${isCollapsed}, ${section.data.length} itens`);
+
+    // Função específica para lidar com o toggle desta categoria
+    const handleToggle = () => {
+      logDebug(TAG, `Toggle clicado para categoria ${category.name} (id: ${category.id}). Estado atual: ${isCollapsed}`);
+      toggleSection(category.id);
+    };
+
+    // Retornamos apenas o header da seção como um CollapsibleSection simplificado
+    return (
+      <CollapsibleSection
+        title={category.name}
+        titleColor={category.color}
+        backgroundColor={`${category.color}30`}
+        count={section.data.length}
+        isCollapsed={isCollapsed}
+        onToggle={handleToggle}
+        contentContainerStyle={styles.sectionContent}
+      >
+        {/* Nós removemos a renderização de itens dentro do CollapsibleSection */}
+        {/* Os itens serão renderizados diretamente pela SectionList */}
+        <View style={{height: 1}} />
+      </CollapsibleSection>
+    );
+  }, [collapsedSections, toggleSection]);
 
   if (isLoading) {
     return (
@@ -451,11 +701,7 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
   }
 
   if (!list) {
-    return (
-      <View style={styles.loading}>
-        <Text style={styles.loadingText}>Lista não encontrada</Text>
-      </View>
-    );
+    return <ListNotFoundScreen onRetry={loadList} onGoBack={() => navigation.goBack()} />;
   }
 
   return (
@@ -464,7 +710,10 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
       <View style={styles.header}>
         <View style={styles.budgetContainer}>
           <Text style={styles.label}>Orçamento:</Text>
-          <Text style={styles.budgetValue}>
+          <Text style={[
+            styles.budgetText,
+            isOverBudget() && styles.overBudget,
+          ]}>
             {list.budget !== undefined
               ? `R$ ${list.budget.toFixed(2).replace('.', ',')}`
               : 'Não definido'}
@@ -484,13 +733,58 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
         </View>
       </View>
 
-      {/* Lista de itens */}
+      {/* Ações de expansão/colapsamento em uma barra separada */}
+      {list.items.length > 0 && (
+        <View style={styles.collapseActions}>
+          <TouchableOpacity
+            style={styles.collapseButton}
+            onPress={() => {
+              logDebug(TAG, 'Botão "Expandir tudo" clicado');
+              expandAll();
+            }}
+          >
+            <Text style={styles.collapseButtonText}>Expandir tudo</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.collapseButton}
+            onPress={() => {
+              logDebug(TAG, 'Botão "Recolher tudo" clicado');
+              collapseAll();
+            }}
+          >
+            <Text style={styles.collapseButtonText}>Recolher tudo</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Lista de itens com otimização de performance */}
       {list.items.length > 0 ? (
-        <FlatList
-          data={list.items}
-          renderItem={renderListItem}
+        <SectionList
+          sections={groupedSections}
           keyExtractor={(item) => item.id}
+          renderItem={({item, section}) => {
+            const categoryId = section.category.id;
+            const isCollapsed = Boolean(collapsedSections[categoryId]);
+
+            // Se a seção estiver colapsada, não renderizamos nada aqui
+            if (isCollapsed) {
+              return null;
+            }
+
+            // Renderizamos diretamente se não estiver colapsado
+            return renderItemForSection({item});
+          }}
+          renderSectionHeader={renderSectionHeader}
+          stickySectionHeadersEnabled={true}
           contentContainerStyle={styles.listContainer}
+          showsVerticalScrollIndicator={false}
+          SectionSeparatorComponent={() => <View style={styles.sectionSeparator} />}
+          initialNumToRender={15}
+          maxToRenderPerBatch={10}
+          windowSize={15}
+          onEndReachedThreshold={0.5}
+          updateCellsBatchingPeriod={50} // Ajustamos para resposta mais rápida
         />
       ) : (
         <View style={styles.emptyContainer}>
@@ -501,10 +795,10 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
 
       {/* Botão para adicionar item */}
       <TouchableOpacity
-        style={styles.fab}
+        style={styles.addButton}
         onPress={handleAddItem}
       >
-        <Text style={styles.fabText}>+</Text>
+        <Text style={styles.addButtonText}>+</Text>
       </TouchableOpacity>
 
       {/* Modal para adicionar/editar item */}
@@ -536,52 +830,71 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
             </View>
 
             <View style={styles.formRow}>
-              <View style={[styles.formGroup, { flex: 1, marginRight: 8 }]}>
+              <View style={[styles.formGroup, { flex: 0.5, marginRight: 8 }]}>
                 <Text style={styles.formLabel}>Quantidade</Text>
                 <TextInput
                   style={styles.textInput}
                   value={itemQuantity}
-                  onChangeText={setItemQuantity}
+                  onChangeText={handleQuantityChange}
                   keyboardType="numeric"
                   placeholder="1"
                 />
               </View>
 
-              <View style={[styles.formGroup, { flex: 1, marginLeft: 8 }]}>
+              <View style={[styles.formGroup, { flex: 1.5, marginLeft: 8 }]}>
                 <Text style={styles.formLabel}>Unidade</Text>
-                <View>
-                  <FlatList
-                    data={UNITS}
-                    renderItem={renderUnit}
-                    keyExtractor={(item) => item}
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.unitList}
-                  />
+                <View style={styles.unitContainer}>
+                  {UNITS.map((unit) => (
+                    <TouchableOpacity
+                      key={unit}
+                      style={[
+                        styles.unitItem,
+                        itemUnit === unit && { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+                      ]}
+                      onPress={() => setItemUnit(unit)}
+                    >
+                      <Text
+                        style={[styles.unitText, itemUnit === unit && { color: COLORS.background }]}
+                      >
+                        {unit}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
               </View>
             </View>
 
-            <View style={styles.formGroup}>
+            <View style={styles.priceFormGroup}>
               <Text style={styles.formLabel}>Preço</Text>
-              <TextInput
-                style={styles.textInput}
-                value={formattedPrice}
-                onChangeText={handlePriceChange}
-                keyboardType="numeric"
-                placeholder="R$ 0,00"
-              />
+              <View style={styles.priceInputContainer}>
+                <TextInput
+                  style={[styles.textInput, styles.priceInput]}
+                  value={formattedPrice}
+                  onChangeText={handlePriceChange}
+                  keyboardType="numeric"
+                  placeholder="R$ 0,00"
+                />
+              </View>
             </View>
 
             <View style={styles.formGroup}>
               <Text style={styles.formLabel}>Categoria</Text>
-              <FlatList
-                data={CATEGORIES}
-                renderItem={renderCategory}
-                keyExtractor={(item) => item.id}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.categoryList}
+              <HorizontalSelector
+                items={CATEGORIES}
+                style={styles.categorySelector}
+                renderItem={(category) => (
+                  <TouchableOpacity
+                    key={category.id}
+                    style={[
+                      styles.categoryItem,
+                      { backgroundColor: category.color + '30' }, // Cor com transparência
+                      itemCategory === category.id && { borderColor: category.color, borderWidth: 2 },
+                    ]}
+                    onPress={() => setItemCategory(category.id)}
+                  >
+                    <Text style={styles.categoryText}>{category.name}</Text>
+                  </TouchableOpacity>
+                )}
               />
             </View>
 
@@ -676,7 +989,7 @@ const styles = StyleSheet.create({
     color: COLORS.textLight,
     textAlign: 'center',
   },
-  fab: {
+  addButton: {
     position: 'absolute',
     right: METRICS.padding.lg,
     bottom: METRICS.padding.lg,
@@ -692,7 +1005,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: 8,
   },
-  fabText: {
+  addButtonText: {
     fontSize: 24,
     color: COLORS.background,
     fontWeight: 'bold',
@@ -700,14 +1013,14 @@ const styles = StyleSheet.create({
   itemCard: {
     flexDirection: 'row',
     padding: METRICS.padding.sm,
-    marginBottom: METRICS.margin.sm,
     borderRadius: METRICS.borderRadii.md,
     backgroundColor: COLORS.background,
+    alignItems: 'center',
     shadowColor: COLORS.shadowColor,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-    elevation: 12,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.23,
+    shadowRadius: 2.62,
+    elevation: 4,
   },
   checkedItem: {
     opacity: 0.7,
@@ -826,13 +1139,18 @@ const styles = StyleSheet.create({
   formGroup: {
     marginBottom: METRICS.margin.md,
   },
+  priceFormGroup: {
+    marginBottom: METRICS.margin.md,
+    marginTop: -8,
+  },
   formRow: {
     flexDirection: 'row',
     marginBottom: METRICS.margin.md,
   },
   formLabel: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: COLORS.text,
     marginBottom: 8,
   },
   textInput: {
@@ -843,30 +1161,37 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.backgroundLight,
     color: COLORS.text,
   },
-  unitList: {
-    paddingVertical: 8,
+  unitContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.backgroundLight,
+    borderRadius: METRICS.borderRadii.md,
+    padding: 6,
   },
   unitItem: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 5,
     borderRadius: METRICS.borderRadii.md,
-    marginRight: 8,
+    flex: 1,
+    marginHorizontal: 2,
     borderWidth: 1,
     borderColor: COLORS.textLight,
     backgroundColor: COLORS.backgroundLight,
+    alignItems: 'center',
   },
   unitText: {
-    fontSize: 14,
+    fontSize: 13,
     color: COLORS.text,
+    textAlign: 'center',
   },
-  categoryList: {
-    paddingVertical: 8,
+  categorySelector: {
+    width: '100%',
   },
   categoryItem: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 4,
+    paddingVertical: 4,
     borderRadius: METRICS.borderRadii.md,
-    marginRight: 8,
+    marginRight: 3,
   },
   categoryText: {
     fontSize: 14,
@@ -905,5 +1230,171 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 16,
     color: COLORS.textSecondary,
+  },
+  selectorContainer: {
+    position: 'relative',
+    width: '100%',
+    borderRadius: METRICS.borderRadii.md,
+    minHeight: 40,
+    backgroundColor: COLORS.backgroundLight,
+    paddingVertical: 4,
+    overflow: 'hidden',
+  },
+  scrollContent: {
+    paddingHorizontal: 0,
+    paddingLeft: 35,
+    paddingRight: 35,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  leftButton: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 20,
+    backgroundColor: 'rgba(76, 175, 80, 0.15)',
+    borderTopLeftRadius: METRICS.borderRadii.md,
+    borderBottomLeftRadius: METRICS.borderRadii.md,
+  },
+  rightButton: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 20,
+    backgroundColor: 'rgba(76, 175, 80, 0.15)',
+    borderTopRightRadius: METRICS.borderRadii.md,
+    borderBottomRightRadius: METRICS.borderRadii.md,
+  },
+  scrollIndicatorIcon: {
+    fontSize: 16,
+    color: COLORS.primary,
+    fontWeight: 'bold',
+  },
+  leftFade: {
+    display: 'none', // Remover fade para evitar sobreposição
+  },
+  rightFade: {
+    display: 'none', // Remover fade para evitar sobreposição
+  },
+  priceInputContainer: {
+    width: '50%',
+  },
+  priceInput: {
+    padding: METRICS.padding.sm,
+  },
+  budgetText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: COLORS.text,
+  },
+  addBudgetButton: {
+    padding: METRICS.padding.sm,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+    borderRadius: METRICS.borderRadii.sm,
+  },
+  addBudgetButtonText: {
+    fontSize: 14,
+    color: COLORS.primary,
+  },
+  totalText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: COLORS.text,
+  },
+  sectionSeparator: {
+    height: 8,
+  },
+  sectionContent: {
+    paddingHorizontal: METRICS.padding.sm,
+    marginBottom: METRICS.margin.md,
+  },
+  itemWrapper: {
+    marginVertical: METRICS.margin.xs,
+  },
+  listContent: {
+    padding: METRICS.padding.md,
+  },
+  collapseActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingVertical: METRICS.padding.xs,
+    paddingHorizontal: METRICS.padding.md,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.backgroundDark,
+  },
+  collapseButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    marginLeft: 8,
+    backgroundColor: COLORS.backgroundLight,
+    borderRadius: METRICS.borderRadii.sm,
+  },
+  collapseButtonText: {
+    fontSize: 12,
+    color: COLORS.primary,
+    fontWeight: '500',
+  },
+  errorContainer: {
+    flex: 1,
+    padding: METRICS.padding.lg,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+  },
+  errorTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: COLORS.error,
+    marginBottom: 16,
+  },
+  errorText: {
+    fontSize: 16,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  errorBullets: {
+    alignSelf: 'stretch',
+    marginBottom: 24,
+  },
+  errorBullet: {
+    fontSize: 16,
+    color: COLORS.textSecondary,
+    marginBottom: 8,
+    paddingLeft: 8,
+  },
+  errorActions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  errorButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    backgroundColor: COLORS.primary,
+    borderRadius: METRICS.borderRadii.md,
+    marginHorizontal: 8,
+  },
+  errorButtonText: {
+    color: COLORS.background,
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  errorButtonSecondary: {
+    backgroundColor: COLORS.backgroundLight,
+  },
+  errorButtonSecondaryText: {
+    color: COLORS.textSecondary,
+    fontWeight: 'bold',
+    fontSize: 16,
   },
 });

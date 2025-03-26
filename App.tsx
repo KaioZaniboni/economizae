@@ -10,6 +10,7 @@ import { StatusBar, SafeAreaView, TouchableOpacity, Text, StyleSheet, View } fro
 import { AppNavigator } from './src/navigation';
 import { COLORS } from './src/constants';
 import { LogProvider } from './src/contexts/LogContext';
+import { NotificationProvider } from './src/contexts/NotificationContext';
 import LogMonitor from './src/components/LogMonitor';
 import DebugComponent from './src/components/DebugComponent';
 
@@ -81,43 +82,45 @@ const App = () => {
   return (
     <View style={styles.rootContainer}>
       <LogProvider>
-        <SafeAreaView style={styles.container}>
-          <StatusBar
-            backgroundColor={COLORS.primary}
-            barStyle="light-content"
-          />
-          <AppNavigator />
+        <NotificationProvider>
+          <SafeAreaView style={styles.container}>
+            <StatusBar
+              backgroundColor={COLORS.primary}
+              barStyle="light-content"
+            />
+            <AppNavigator />
 
-          {/* Componente de debug para verificar problemas de renderização */}
-          {showDebug && <DebugComponent />}
+            {/* Componente de debug para verificar problemas de renderização */}
+            {showDebug && <DebugComponent />}
 
-          {/* Botões que só aparecem quando showButtons é true */}
-          {showButtons && (
-            <>
-              {/* Botão flutuante para abrir o monitor de logs */}
-              <TouchableOpacity
-                style={styles.logButton}
-                onPress={toggleLogMonitor}
-              >
-                <Text style={styles.logButtonText}>LOGS</Text>
-              </TouchableOpacity>
+            {/* Botões que só aparecem quando showButtons é true */}
+            {showButtons && (
+              <>
+                {/* Botão flutuante para abrir o monitor de logs */}
+                <TouchableOpacity
+                  style={styles.logButton}
+                  onPress={toggleLogMonitor}
+                >
+                  <Text style={styles.logButtonText}>LOGS</Text>
+                </TouchableOpacity>
 
-              {/* Botão para alternar o componente de debug */}
-              <TouchableOpacity
-                style={[styles.logButton, styles.debugButton]}
-                onPress={toggleDebugComponent}
-              >
-                <Text style={styles.logButtonText}>DEBUG</Text>
-              </TouchableOpacity>
-            </>
-          )}
+                {/* Botão para alternar o componente de debug */}
+                <TouchableOpacity
+                  style={[styles.logButton, styles.debugButton]}
+                  onPress={toggleDebugComponent}
+                >
+                  <Text style={styles.logButtonText}>DEBUG</Text>
+                </TouchableOpacity>
+              </>
+            )}
 
-          {/* Monitor de logs */}
-          <LogMonitor
-            visible={logMonitorVisible}
-            onClose={() => setLogMonitorVisible(false)}
-          />
-        </SafeAreaView>
+            {/* Monitor de logs */}
+            <LogMonitor
+              visible={logMonitorVisible}
+              onClose={() => setLogMonitorVisible(false)}
+            />
+          </SafeAreaView>
+        </NotificationProvider>
       </LogProvider>
     </View>
   );
