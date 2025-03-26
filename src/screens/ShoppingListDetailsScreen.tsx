@@ -16,7 +16,6 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
   SectionList,
-  Button,
 } from 'react-native';
 import { RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -164,7 +163,8 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
   const [list, setList] = useState<ShoppingList | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   // Estados para o novo item
   const [itemName, setItemName] = useState('');
@@ -175,7 +175,7 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
   const [itemCategory, setItemCategory] = useState('outros');
 
   // Gerenciamento do estado de colapso de seções com persistência usando o hook personalizado
-  const { sections, collapsedSections, toggleSection, toggleAll, isCollapsed } = useSectionCollapse(
+  const { collapsedSections, toggleSection, toggleAll } = useSectionCollapse(
     useMemo(() => {
       // Obter array de IDs de categorias para inicializar o estado de colapso
       return list?.items
@@ -206,8 +206,6 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
   // Carregar a lista
   const loadList = useCallback(async () => {
     let retryCount = 0;
-    const MAX_RETRIES = 3;
-    const RETRY_DELAY = 1000; // 1 segundo
 
     const attemptLoad = async (): Promise<boolean> => {
       try {
@@ -216,6 +214,7 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
         }
 
         setIsLoading(true);
+        setLoadFailed(false);
 
         // Usar a função de retry para carregar a lista com mais robustez
         const data = await withRetry(
@@ -227,6 +226,7 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
 
         if (data) {
           setList(data);
+          setLoadFailed(false);
           logDebug(TAG, `Lista ${listId} carregada com sucesso: ${data.name} (${data.items.length} itens)`);
 
           // Atualizar título da tela
@@ -262,35 +262,14 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
           }
           return true;
         } else {
-          // Lista não encontrada
-          logDebug(TAG, `Lista não encontrada com ID: ${listId}`);
-
-          if (retryCount < MAX_RETRIES) {
-            // Tentar novamente após um breve atraso
-            retryCount++;
-            logDebug(TAG, `Agendando nova tentativa ${retryCount}/${MAX_RETRIES} em ${RETRY_DELAY}ms`);
-            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
-            return attemptLoad();
-          } else {
-            logError(TAG, `Lista não encontrada após ${MAX_RETRIES} tentativas`);
-            setList(null); // Garantir que o estado reflita que a lista não foi encontrada
-            return false;
-          }
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        logError(TAG, `Erro ao carregar lista: ${errorMessage}`);
-
-        if (retryCount < MAX_RETRIES) {
-          // Tentar novamente após um breve atraso
-          retryCount++;
-          logDebug(TAG, `Agendando nova tentativa ${retryCount}/${MAX_RETRIES} após erro em ${RETRY_DELAY}ms`);
-          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
-          return attemptLoad();
-        } else {
-          setList(null); // Garantir que o estado reflita que houve um erro
+          logError(TAG, `Lista ${listId} não encontrada após recuperação`);
+          setLoadFailed(true);
           return false;
         }
+      } catch (error) {
+        logError(TAG, `Erro ao carregar lista ${listId}: ${error}`);
+        setLoadFailed(true);
+        return false;
       } finally {
         setIsLoading(false);
       }
@@ -692,243 +671,257 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
     );
   }, [collapsedSections, toggleSection]);
 
-  if (isLoading) {
+  // Conteúdo principal - modificado para considerar os estados de loading e falha
+  const renderContent = () => {
+    if (isLoading) {
+      return (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.loadingText}>Carregando lista...</Text>
+        </View>
+      );
+    }
+
+    if (loadFailed || !list) {
+      return (
+        <ListNotFoundScreen
+          onRetry={() => loadList()}
+          onGoBack={() => navigation.goBack()}
+        />
+      );
+    }
+
     return (
-      <View style={styles.loading}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={styles.loadingText}>Carregando...</Text>
+      <View style={styles.container}>
+        {/* Cabeçalho com orçamento e total */}
+        <View style={styles.header}>
+          <View style={styles.headerRow}>
+            <View style={styles.budgetContainer}>
+              <Text style={styles.label}>Orçamento:</Text>
+              <Text style={[
+                styles.budgetText,
+                isOverBudget() && styles.overBudget,
+              ]}>
+                {list.budget !== undefined
+                  ? `R$ ${list.budget.toFixed(2).replace('.', ',')}`
+                  : 'Não definido'}
+              </Text>
+            </View>
+
+            <View style={styles.totalContainer}>
+              <Text style={styles.label}>Total:</Text>
+              <Text style={[
+                styles.totalValue,
+                isOverBudget() && styles.overBudget,
+              ]}>
+                {list.total !== undefined
+                  ? `R$ ${list.total.toFixed(2).replace('.', ',')}`
+                  : 'R$ 0,00'}
+              </Text>
+            </View>
+          </View>
+
+          {list.items.length > 0 && (
+            <View style={styles.headerButtons}>
+              <TouchableOpacity
+                style={[styles.headerButton, styles.expandButton]}
+                onPress={() => {
+                  logDebug(TAG, 'Botão "Expandir tudo" clicado');
+                  toggleAll();
+                }}
+              >
+                <Icon
+                  name="expand-all"
+                  type="material-community"
+                  size={18}
+                  color={COLORS.primary}
+                />
+                <Text style={styles.headerButtonText}>Expandir</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.headerButton, styles.collapseButton]}
+                onPress={() => {
+                  logDebug(TAG, 'Botão "Recolher tudo" clicado');
+                  toggleAll();
+                }}
+              >
+                <Icon
+                  name="collapse-all"
+                  type="material-community"
+                  size={18}
+                  color={COLORS.primary}
+                />
+                <Text style={styles.headerButtonText}>Recolher</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
+        {/* Lista de itens com otimização de performance */}
+        {list.items.length > 0 ? (
+          <SectionList
+            sections={groupedSections}
+            keyExtractor={(item) => item.id}
+            renderItem={({item, section}) => {
+              const categoryId = section.category.id;
+              const isCollapsed = Boolean(collapsedSections[categoryId]);
+
+              // Se a seção estiver colapsada, não renderizamos nada aqui
+              if (isCollapsed) {
+                return null;
+              }
+
+              // Renderizamos diretamente se não estiver colapsado
+              return renderItemForSection({item});
+            }}
+            renderSectionHeader={renderSectionHeader}
+            stickySectionHeadersEnabled={true}
+            contentContainerStyle={styles.listContainer}
+            showsVerticalScrollIndicator={false}
+            SectionSeparatorComponent={() => <View style={styles.sectionSeparator} />}
+            initialNumToRender={15}
+            maxToRenderPerBatch={10}
+            windowSize={15}
+            onEndReachedThreshold={0.5}
+            updateCellsBatchingPeriod={50} // Ajustamos para resposta mais rápida
+          />
+        ) : (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>Nenhum item na lista</Text>
+            <Text style={styles.emptySubtext}>Toque no botão + para adicionar itens</Text>
+          </View>
+        )}
+
+        {/* Botão para adicionar item */}
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={handleAddItem}
+        >
+          <Text style={styles.addButtonText}>+</Text>
+        </TouchableOpacity>
+
+        {/* Modal para adicionar/editar item */}
+        <Modal
+          animationType="slide"
+          transparent={true}
+          visible={modalVisible}
+          onRequestClose={() => setModalVisible(false)}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.modalContainer}
+          >
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>
+                {editingItem ? 'Editar Item' : 'Novo Item'}
+              </Text>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Nome do item</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={itemName}
+                  onChangeText={setItemName}
+                  placeholder="Ex: Arroz, Leite, Sabonete..."
+                  autoCapitalize="words"
+                  autoFocus
+                />
+              </View>
+
+              <View style={styles.formRow}>
+                <View style={[styles.formGroup, { flex: 0.5, marginRight: 8 }]}>
+                  <Text style={styles.formLabel}>Quantidade</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    value={itemQuantity}
+                    onChangeText={handleQuantityChange}
+                    keyboardType="numeric"
+                    placeholder="1"
+                  />
+                </View>
+
+                <View style={[styles.formGroup, { flex: 1.5, marginLeft: 8 }]}>
+                  <Text style={styles.formLabel}>Unidade</Text>
+                  <View style={styles.unitContainer}>
+                    {UNITS.map((unit) => (
+                      <TouchableOpacity
+                        key={unit}
+                        style={[
+                          styles.unitItem,
+                          itemUnit === unit && { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+                        ]}
+                        onPress={() => setItemUnit(unit)}
+                      >
+                        <Text
+                          style={[styles.unitText, itemUnit === unit && { color: COLORS.background }]}
+                        >
+                          {unit}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.priceFormGroup}>
+                <Text style={styles.formLabel}>Preço</Text>
+                <View style={styles.priceInputContainer}>
+                  <TextInput
+                    style={[styles.textInput, styles.priceInput]}
+                    value={formattedPrice}
+                    onChangeText={handlePriceChange}
+                    keyboardType="numeric"
+                    placeholder="R$ 0,00"
+                  />
+                </View>
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Categoria</Text>
+                <HorizontalSelector
+                  items={CATEGORIES}
+                  style={styles.categorySelector}
+                  renderItem={(category) => (
+                    <TouchableOpacity
+                      key={category.id}
+                      style={[
+                        styles.categoryItem,
+                        { backgroundColor: category.color + '30' }, // Cor com transparência
+                        itemCategory === category.id && { borderColor: category.color, borderWidth: 2 },
+                      ]}
+                      onPress={() => setItemCategory(category.id)}
+                    >
+                      <Text style={styles.categoryText}>{category.name}</Text>
+                    </TouchableOpacity>
+                  )}
+                />
+              </View>
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.cancelButton]}
+                  onPress={() => setModalVisible(false)}
+                >
+                  <Text style={styles.cancelButtonText}>Cancelar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.saveButton]}
+                  onPress={handleSaveItem}
+                >
+                  <Text style={styles.saveButtonText}>Salvar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
       </View>
     );
-  }
-
-  if (!list) {
-    return <ListNotFoundScreen onRetry={loadList} onGoBack={() => navigation.goBack()} />;
-  }
+  };
 
   return (
     <View style={styles.container}>
-      {/* Cabeçalho com orçamento e total */}
-      <View style={styles.header}>
-        <View style={styles.headerRow}>
-          <View style={styles.budgetContainer}>
-            <Text style={styles.label}>Orçamento:</Text>
-            <Text style={[
-              styles.budgetText,
-              isOverBudget() && styles.overBudget,
-            ]}>
-              {list.budget !== undefined
-                ? `R$ ${list.budget.toFixed(2).replace('.', ',')}`
-                : 'Não definido'}
-            </Text>
-          </View>
-
-          <View style={styles.totalContainer}>
-            <Text style={styles.label}>Total:</Text>
-            <Text style={[
-              styles.totalValue,
-              isOverBudget() && styles.overBudget,
-            ]}>
-              {list.total !== undefined
-                ? `R$ ${list.total.toFixed(2).replace('.', ',')}`
-                : 'R$ 0,00'}
-            </Text>
-          </View>
-        </View>
-
-        {list.items.length > 0 && (
-          <View style={styles.headerButtons}>
-            <TouchableOpacity
-              style={[styles.headerButton, styles.expandButton]}
-              onPress={() => {
-                logDebug(TAG, 'Botão "Expandir tudo" clicado');
-                toggleAll();
-              }}
-            >
-              <Icon
-                name="expand-all"
-                type="material-community"
-                size={18}
-                color={COLORS.primary}
-              />
-              <Text style={styles.headerButtonText}>Expandir</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.headerButton, styles.collapseButton]}
-              onPress={() => {
-                logDebug(TAG, 'Botão "Recolher tudo" clicado');
-                toggleAll();
-              }}
-            >
-              <Icon
-                name="collapse-all"
-                type="material-community"
-                size={18}
-                color={COLORS.primary}
-              />
-              <Text style={styles.headerButtonText}>Recolher</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
-
-      {/* Lista de itens com otimização de performance */}
-      {list.items.length > 0 ? (
-        <SectionList
-          sections={groupedSections}
-          keyExtractor={(item) => item.id}
-          renderItem={({item, section}) => {
-            const categoryId = section.category.id;
-            const isCollapsed = Boolean(collapsedSections[categoryId]);
-
-            // Se a seção estiver colapsada, não renderizamos nada aqui
-            if (isCollapsed) {
-              return null;
-            }
-
-            // Renderizamos diretamente se não estiver colapsado
-            return renderItemForSection({item});
-          }}
-          renderSectionHeader={renderSectionHeader}
-          stickySectionHeadersEnabled={true}
-          contentContainerStyle={styles.listContainer}
-          showsVerticalScrollIndicator={false}
-          SectionSeparatorComponent={() => <View style={styles.sectionSeparator} />}
-          initialNumToRender={15}
-          maxToRenderPerBatch={10}
-          windowSize={15}
-          onEndReachedThreshold={0.5}
-          updateCellsBatchingPeriod={50} // Ajustamos para resposta mais rápida
-        />
-      ) : (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>Nenhum item na lista</Text>
-          <Text style={styles.emptySubtext}>Toque no botão + para adicionar itens</Text>
-        </View>
-      )}
-
-      {/* Botão para adicionar item */}
-      <TouchableOpacity
-        style={styles.addButton}
-        onPress={handleAddItem}
-      >
-        <Text style={styles.addButtonText}>+</Text>
-      </TouchableOpacity>
-
-      {/* Modal para adicionar/editar item */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalContainer}
-        >
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>
-              {editingItem ? 'Editar Item' : 'Novo Item'}
-            </Text>
-
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Nome do item</Text>
-              <TextInput
-                style={styles.textInput}
-                value={itemName}
-                onChangeText={setItemName}
-                placeholder="Ex: Arroz, Leite, Sabonete..."
-                autoCapitalize="words"
-                autoFocus
-              />
-            </View>
-
-            <View style={styles.formRow}>
-              <View style={[styles.formGroup, { flex: 0.5, marginRight: 8 }]}>
-                <Text style={styles.formLabel}>Quantidade</Text>
-                <TextInput
-                  style={styles.textInput}
-                  value={itemQuantity}
-                  onChangeText={handleQuantityChange}
-                  keyboardType="numeric"
-                  placeholder="1"
-                />
-              </View>
-
-              <View style={[styles.formGroup, { flex: 1.5, marginLeft: 8 }]}>
-                <Text style={styles.formLabel}>Unidade</Text>
-                <View style={styles.unitContainer}>
-                  {UNITS.map((unit) => (
-                    <TouchableOpacity
-                      key={unit}
-                      style={[
-                        styles.unitItem,
-                        itemUnit === unit && { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-                      ]}
-                      onPress={() => setItemUnit(unit)}
-                    >
-                      <Text
-                        style={[styles.unitText, itemUnit === unit && { color: COLORS.background }]}
-                      >
-                        {unit}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.priceFormGroup}>
-              <Text style={styles.formLabel}>Preço</Text>
-              <View style={styles.priceInputContainer}>
-                <TextInput
-                  style={[styles.textInput, styles.priceInput]}
-                  value={formattedPrice}
-                  onChangeText={handlePriceChange}
-                  keyboardType="numeric"
-                  placeholder="R$ 0,00"
-                />
-              </View>
-            </View>
-
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Categoria</Text>
-              <HorizontalSelector
-                items={CATEGORIES}
-                style={styles.categorySelector}
-                renderItem={(category) => (
-                  <TouchableOpacity
-                    key={category.id}
-                    style={[
-                      styles.categoryItem,
-                      { backgroundColor: category.color + '30' }, // Cor com transparência
-                      itemCategory === category.id && { borderColor: category.color, borderWidth: 2 },
-                    ]}
-                    onPress={() => setItemCategory(category.id)}
-                  >
-                    <Text style={styles.categoryText}>{category.name}</Text>
-                  </TouchableOpacity>
-                )}
-              />
-            </View>
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => setModalVisible(false)}
-              >
-                <Text style={styles.cancelButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.modalButton, styles.saveButton]}
-                onPress={handleSaveItem}
-              >
-                <Text style={styles.saveButtonText}>Salvar</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+      {renderContent()}
     </View>
   );
 };
@@ -1431,5 +1424,11 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontWeight: 'bold',
     fontSize: 16,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
   },
 });
