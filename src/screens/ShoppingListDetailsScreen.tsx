@@ -165,6 +165,7 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [searchText, setSearchText] = useState(''); // Estado para pesquisa
 
   // Estados para o novo item
   const [itemName, setItemName] = useState('');
@@ -519,52 +520,46 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
     }
   };
 
-  // Função para agrupar itens por categoria com memoização
-  const groupItemsByCategory = useCallback(() => {
-    if (!list?.items?.length) {
-      logDebug(TAG, 'Lista vazia ou não carregada, retornando array vazio');
-      return [];
-    }
-
-    const startTime = Date.now();
-    logDebug(TAG, `Agrupando ${list.items.length} itens por categoria`);
-
-    const groupedItems: Record<string, Item[]> = {};
-
-    // Inicializar grupos vazios para todas as categorias
-    CATEGORIES.forEach(category => {
-      groupedItems[category.id] = [];
-    });
-
-    // Adicionar cada item ao seu respectivo grupo
-    list.items.forEach(item => {
-      const category = item.category || 'outros';
-      if (!groupedItems[category]) {
-        groupedItems[category] = [];
-      }
-      groupedItems[category].push(item);
-    });
-
-    // Converter para array de seções
-    const sections = CATEGORIES
-      .filter(category => groupedItems[category.id]?.length > 0) // Remover categorias vazias
-      .map(category => ({
-        category,
-        data: groupedItems[category.id],
-      }));
-
-    const endTime = Date.now();
-    logDebug(TAG, `Agrupamento concluído em ${endTime - startTime}ms. ${sections.length} categorias com itens.`);
-
-    return sections;
-  }, [list?.items]);
-
-  // Memoizar o resultado para evitar recálculos desnecessários
+  // Agrupar itens por categoria com inclusão do filtro de busca
   const groupedSections = useMemo(() => {
-    const sections = groupItemsByCategory();
-    logDebug(TAG, `Seções agrupadas memoizadas: ${sections.length} categorias`);
-    return sections;
-  }, [groupItemsByCategory]);
+    if (!list) {return [];}
+
+    // Filtra os itens com base no texto da busca
+    const filteredItems = searchText.trim()
+      ? list.items.filter(item =>
+          item.name.toLowerCase().includes(searchText.toLowerCase())
+        )
+      : list.items;
+
+    // Agrupar itens por categoria
+    const categories = Array.from(
+      new Set(filteredItems.map(item => item.category || 'outros'))
+    ).map(categoryId => {
+      const categoryItems = filteredItems.filter(
+        item => (item.category || 'outros') === categoryId
+      );
+
+      // Encontrar a categoria no array CATEGORIES
+      const category = CATEGORIES.find(cat => cat.id === categoryId) || {
+        id: categoryId,
+        name: categoryId.charAt(0).toUpperCase() + categoryId.slice(1),
+        color: '#9E9E9E',
+      };
+
+      return {
+        category,
+        data: categoryItems,
+      };
+    });
+
+    // Ordenar categorias pelo nome
+    return categories.sort((a, b) => a.category.name.localeCompare(b.category.name));
+  }, [list, searchText]);
+
+  // Limpar a busca
+  const clearSearch = () => {
+    setSearchText('');
+  };
 
   // Renderizar item da lista para o conteúdo da seção
   const renderItemForSection = useCallback(({ item }: { item: Item }) => {
@@ -732,7 +727,6 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
               >
                 <Icon
                   name="expand-all"
-                  type="material-community"
                   size={18}
                   color={COLORS.primary}
                 />
@@ -747,12 +741,30 @@ export const ShoppingListDetailsScreen = ({ route, navigation }: ShoppingListDet
               >
                 <Icon
                   name="collapse-all"
-                  type="material-community"
                   size={18}
                   color={COLORS.primary}
                 />
                 <Text style={styles.headerButtonText}>Recolher</Text>
               </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Barra de busca */}
+          {list.items.length > 0 && (
+            <View style={styles.searchContainer}>
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Buscar itens pelo nome..."
+                value={searchText}
+                onChangeText={setSearchText}
+              />
+              {searchText ? (
+                <TouchableOpacity onPress={clearSearch} style={styles.clearButton}>
+                  <Icon name="close-circle" size={18} color={COLORS.textLight} />
+                </TouchableOpacity>
+              ) : (
+                <Icon name="magnify" size={18} color={COLORS.textLight} style={styles.searchIcon} />
+              )}
             </View>
           )}
         </View>
@@ -1430,5 +1442,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: COLORS.background,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+    borderRadius: METRICS.borderRadius,
+    marginTop: 12,
+    marginHorizontal: 4,
+    paddingHorizontal: 12,
+    height: 40,
+    borderWidth: 1,
+    borderColor: COLORS.backgroundLight,
+  },
+  searchInput: {
+    flex: 1,
+    height: 40,
+    fontSize: 14,
+    color: COLORS.text,
+  },
+  clearButton: {
+    padding: 5,
+  },
+  searchIcon: {
+    marginRight: 5,
   },
 });
